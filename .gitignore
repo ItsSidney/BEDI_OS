@@ -1,0 +1,8 @@
+bin/
+iso_root/
+*.iso
+*.o
+*.bin
+limine-11.4.1/
+tools/limine/
+tools/limine-bin/
