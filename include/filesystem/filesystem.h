@@ -9,15 +9,12 @@
 #define MAX_PATH 256
 #define MAX_DIRS 32
 
-typedef enum {
-    FS_FILE,
-    FS_DIRECTORY
-} fs_type_t;
+#define FS_FLAG_READONLY  0x01
+#define FS_FLAG_HIDDEN    0x02
+#define FS_FLAG_SYSTEM    0x04
+#define FS_FLAG_EXECUTABLE 0x08
 
-// File flags
-#define FS_FLAG_READONLY 0x01
-#define FS_FLAG_HIDDEN   0x02
-#define FS_FLAG_SYSTEM   0x04
+typedef enum { FS_FILE, FS_DIRECTORY } fs_type_t;
 
 typedef struct {
     char name[MAX_FILENAME];
@@ -25,7 +22,7 @@ typedef struct {
     int size;
     int in_use;
     fs_type_t type;
-    int parent_dir;  // Index of parent directory, -1 for root
+    int parent_dir;
     uint8_t flags;
     uint32_t creation_time;
     uint32_t modified_time;
@@ -50,8 +47,24 @@ int fs_touch(const char* filename);
 int fs_rename(const char* oldname, const char* newname);
 int fs_move(const char* src, const char* dst);
 int fs_truncate(const char* filename);
-int get_user_dir();  // Get index of USER directory
+int get_user_dir();
 int fs_get_node(int idx, char* name, int* size, int* type, int* parent, uint8_t* flags, uint32_t* mod_time);
 int fs_get_current_dir();
 int fs_set_flags(const char* filename, uint8_t flags);
+
+// New expanded API
+int fs_get_home_dir();
+int fs_get_trash_dir();
+int fs_trash_file(const char* filename);
+int fs_empty_trash();
+int fs_restore_from_trash(const char* filename);
+int fs_get_free_count();
+int fs_copy_file(const char* src_name, const char* dst_name);
+int fs_get_dir_count(int dir_idx);
+int fs_find_child(int dir_idx, int child_idx);
+void fs_get_permission_string(uint8_t flags, char* out);
+void fs_format_time(uint32_t ms, char* out, int max_len);
+int fs_is_directory_empty(int dir_idx);
+int fs_find_by_index(int dir_idx, int nth, char* name, int* size, int* type, uint8_t* flags, uint32_t* mod_time);
+
 #endif
