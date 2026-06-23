@@ -1,0 +1,47 @@
+#include "commands/commands.h"
+#include "commands/vm.h"
+#include "filesystem/filesystem.h"
+#include "kernel/mem/kheap.h"
+#include "drivers/video/framebuffer.h"
+
+// Tokenizer & Parser State
+static char* src;
+static char* tok_sval;
+static int tok_ival;
+typedef enum { TOK_INT, TOK_VOID, TOK_IF, TOK_WHILE, TOK_RETURN, TOK_ID, TOK_NUM, TOK_STRING, TOK_LPAREN, TOK_RPAREN, TOK_LBRACE, TOK_RBRACE, TOK_SEMICOLON, TOK_ASSIGN, TOK_PLUS, TOK_EOF } token_t;
+static token_t curr_tok;
+
+// Bytecode Buffer
+static uint8_t* code_buf;
+static int code_ptr = 0;
+
+static void emit(uint8_t op) { code_buf[code_ptr++] = op; }
+static void emit32(int32_t val) { *(int32_t*)&code_buf[code_ptr] = val; code_ptr += 4; }
+
+// Simple Parser (stub)
+static void parse_expr() {
+    // Current simple parser only handles numbers/literals for demo
+    if (curr_tok == TOK_NUM) {
+        emit(OP_PUSH); emit32(tok_ival);
+    }
+}
+
+// ... [Full rewrite of parser logic will go here]
+
+void bcc_main(char* args) {
+    // ... [Argument parsing]
+    
+    // Setup for bytecode generation
+    code_buf = kmalloc(VM_MEM_SIZE);
+    code_ptr = 0;
+    
+    // 1. Tokenize...
+    // 2. Parse statements...
+    // 3. Emit B-BC bytecode...
+    
+    // Example: Emitting 'Hello' print from previous test
+    emit(OP_PRINT); emit32(100); 
+    emit(OP_EXIT);
+
+    // Save to file...
+}

@@ -1,0 +1,9 @@
+#ifndef FAT32_H
+#define FAT32_H
+
+#include "drivers/storage/storage.h"
+#include "filesystem/vfs.h"
+
+vfs_node_t* fat32_init(block_device_t* dev, uint32_t partition_lba);
+
+#endif
