@@ -69,6 +69,7 @@ int wm_open_window(int x, int y, int w, int h, const char* title, uint32_t accen
     win->id = next_win_id++;
     win->x = x; if (win->x < 0) win->x = 0;
     win->y = y; if (win->y < TOP_BAR_H) win->y = TOP_BAR_H;
+    if (win->y + win->h > get_fb_height() - TASKBAR_H) win->y = get_fb_height() - TASKBAR_H - win->h;
     win->w = w; win->h = h;
     win->desktop = current_desktop;
     win->view_x = 0; win->view_y = 0;
@@ -256,6 +257,7 @@ int wm_tick(void) {
             if (mbtn & 1) {
                 win->x = mx - win->drag_offset_x; win->y = my - win->drag_offset_y;
                 if (win->y < TOP_BAR_H) win->y = TOP_BAR_H;
+                if (win->y + win->h > fh - TASKBAR_H) win->y = fh - TASKBAR_H - win->h;
             } else win->flags &= ~WM_FLAG_DRAGGING;
         }
         if (win->flags & WM_FLAG_RESIZING) {

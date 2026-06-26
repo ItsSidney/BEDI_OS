@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define TASKBAR_H 30
+
 void start_gui(void);
 void gui_shell(void);
 void draw_premium_wallpaper(void);

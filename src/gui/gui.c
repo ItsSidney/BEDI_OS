@@ -71,7 +71,6 @@ static int search_result_count = 0;
 static int search_sel = 0;
 static int search_open = 0;
 
-#define TASKBAR_H 30
 #define MAX_PINNED_APPS 10
 #define MAX_ALL_APPS 23
 #define DESKTOP_COUNT 5
@@ -310,24 +309,26 @@ void draw_taskbar() {
         wx += tab_w + gap + 2;
     }
 
-    /* Desktop switcher (popup above taskbar, anchored to right tray area) */
-    int desk_w = 28, desk_h = 22, desk_gap = 4;
-    int desk_area_w = DESKTOP_COUNT * (desk_w + desk_gap) - desk_gap;
-    int desk_area_x = fw - 150 - margin - 8 - desk_area_w;
-    int desk_start_x = desk_area_x;
-    for (int i = 0; i < DESKTOP_COUNT; i++) {
-        int dx = desk_start_x + i * (desk_w + desk_gap);
-        int dy = taskbar_y + 4;
-        int hover = point_in_rect(mx, my, dx, dy, desk_w, desk_h);
-        int is_current = (i == wm_get_current_desktop());
-        uint32_t box_bg = is_current ? tab_active : (hover ? border : (p->theme == 0 ? 0x16181E : 0xE5E7EB));
-        uint32_t txt_clr = is_current ? text_clr : muted;
-        gfx_fill_rect_rounded(dx, dy, desk_w, desk_h, 4, box_bg);
-        gfx_draw_rect_rounded_outline(dx, dy, desk_w, desk_h, 4, 1, border);
-        char num[2];
-        num[0] = '1' + i;
-        num[1] = 0;
-        gfx_draw_string_transparent(dx + 8, dy + 3, num, txt_clr);
+    if (open_windows == 0) {
+        /* Desktop switcher (right taskbar area) */
+        int desk_w = 28, desk_h = 22, desk_gap = 4;
+        int desk_area_w = DESKTOP_COUNT * (desk_w + desk_gap) - desk_gap;
+        int desk_area_x = fw - 150 - margin - 8 - desk_area_w;
+        int desk_start_x = desk_area_x;
+        for (int i = 0; i < DESKTOP_COUNT; i++) {
+            int dx = desk_start_x + i * (desk_w + desk_gap);
+            int dy = taskbar_y + 4;
+            int hover = point_in_rect(mx, my, dx, dy, desk_w, desk_h);
+            int is_current = (i == wm_get_current_desktop());
+            uint32_t box_bg = is_current ? tab_active : (hover ? border : (p->theme == 0 ? 0x16181E : 0xE5E7EB));
+            uint32_t txt_clr = is_current ? text_clr : muted;
+            gfx_fill_rect_rounded(dx, dy, desk_w, desk_h, 4, box_bg);
+            gfx_draw_rect_rounded_outline(dx, dy, desk_w, desk_h, 4, 1, border);
+            char num[2];
+            num[0] = '1' + i;
+            num[1] = 0;
+            gfx_draw_string_transparent(dx + 8, dy + 3, num, txt_clr);
+        }
     }
 
     /* Right: volume grid square + clock tray */
@@ -729,7 +730,9 @@ void start_gui(void) {
         if (clicked) {
             /* Start button */
             if (!click_handled && point_in_rect(cx, cy, margin, taskbar_y, start_btn_w, TASKBAR_H)) {
-                search_open = 0; if (g_st >= 2) g_st = 1; else g_st = 2; m_idx = 0; click_handled = 1;
+                if (g_st >= 2) { search_open = 0; g_st = 1; }
+                else if (wm_get_window_count() == 0) { search_open = 0; g_st = 2; }
+                m_idx = 0; click_handled = 1;
             }
 
             /* Search button */
@@ -755,7 +758,7 @@ void start_gui(void) {
             }
 
             /* Desktop switcher */
-            if (!click_handled) {
+            if (!click_handled && open_windows == 0) {
                 for (int i = 0; i < DESKTOP_COUNT; i++) {
                     int dx = desk_start_x + i * (desk_w + desk_gap);
                     int dy = taskbar_y + 4;
