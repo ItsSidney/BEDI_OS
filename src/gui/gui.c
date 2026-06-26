@@ -697,9 +697,6 @@ void gui_handle_search_key(char key_in) {
 
 void start_gui(void) {
     gui_running = 1; g_st = 1; search_open = 0; m_idx = 0; wm_init(); gfx_reset_clip();
-    uint64_t last_fps_ticks = timer_ticks;
-    int frame_count = 0;
-    int current_fps = 0;
     while (gui_running) {
         int mbtn = mouse_get_buttons(), cx = mouse_get_x(), cy = mouse_get_y(), fw = get_fb_width(), fh = get_fb_height();
         if (fw == 0) { sleep_ms(10); continue; }
@@ -824,24 +821,6 @@ void start_gui(void) {
         draw_taskbar();
         if (g_st >= 2) render_menu(); if (search_open) render_search_panel();
         mouse_draw_cursor();
-        frame_count++;
-        if (timer_ticks - last_fps_ticks >= 1000) {
-            current_fps = frame_count;
-            frame_count = 0;
-            last_fps_ticks = timer_ticks;
-            char buf[32];
-            int i = 0;
-            int v = current_fps;
-            buf[i++] = 'F'; buf[i++] = 'P'; buf[i++] = 'S'; buf[i++] = ':';
-            if (v == 0) { buf[i++] = '0'; }
-            else {
-                char tmp[8]; int ti = 0;
-                while (v > 0 && ti < 7) { tmp[ti++] = '0' + v % 10; v /= 10; }
-                for (int j = ti - 1; j >= 0; j--) buf[i++] = tmp[j];
-            }
-            buf[i] = 0;
-            gfx_draw_string_transparent(4, 4, buf, 0xFFFFFF);
-        }
         swap_buffers();
         prev_mouse_btn = mbtn;
         sleep_ms(16);
