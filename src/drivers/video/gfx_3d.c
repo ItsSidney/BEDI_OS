@@ -1,4 +1,5 @@
 #include "graphics/renderer.h"
+#include <stdint.h>
 
 /* Coarse Utah teapot mesh - triangles with normals */
 typedef struct { float x,y,z; float nx,ny,nz; } teapot_vert_t;
@@ -161,6 +162,7 @@ static const teapot_vert_t gBody5[] = {
 #define TEAPOT_SEGS 24
 static mesh_tri_t gTris[800];
 static int gTriCount = 0;
+static uint32_t g_teapot_zbuf[1920*1080];
 
 static void add_tri(teapot_vert_t a, teapot_vert_t b, teapot_vert_t c, uint32_t col) {
     if (gTriCount >= 800) return;
@@ -174,22 +176,22 @@ static void add_tri(teapot_vert_t a, teapot_vert_t b, teapot_vert_t c, uint32_t 
     t->color = col;
 }
 
-static uint32_t lerp_color(uint32_t a, uint32_t b, float t) {
-    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+static uint32_t lerp_color(uint32_t a, uint32_t b, float f) {
+    f = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
     uint8_t ar = (a>>16)&0xFF, ag = (a>>8)&0xFF, ab = a&0xFF;
     uint8_t br = (b>>16)&0xFF, bg = (b>>8)&0xFF, bb = b&0xFF;
-    uint8_t rr = (uint8_t)(ar + (br-ar)*t);
-    uint8_t rg = (uint8_t)(ag + (bg-ag)*t);
-    uint8_t rb = (uint8_t)(ab + (bb-ab)*t);
+    uint8_t rr = (uint8_t)(ar + (br-ar)*f);
+    uint8_t rg = (uint8_t)(ag + (bg-ag)*f);
+    uint8_t rb = (uint8_t)(ab + (bb-ab)*f);
     return (rr<<16)|(rg<<8)|rb;
 }
 
 static void build_ring(const teapot_vert_t* ring, int n, const teapot_vert_t* next, uint32_t c1, uint32_t c2) {
     for (int i = 0; i < n; i++) {
         int ni = (i+1)%n;
-        float t = (float)i / (float)n;
-        add_tri(ring[i], ring[ni], next[i], lerp_color(c1, c2, t));
-        add_tri(ring[ni], next[ni], next[i], lerp_color(c1, c2, t));
+        float f = (float)i / (float)n;
+        add_tri(ring[i], ring[ni], next[i], lerp_color(c1, c2, f));
+        add_tri(ring[ni], next[ni], next[i], lerp_color(c1, c2, f));
     }
 }
 
@@ -259,10 +261,8 @@ void gfx_3d_render_teapot(int rx, int ry, int rw, int rh, float ax, float ay) {
     mat4_mul(tmp, proj, view);
     mat4_mul(mvp, tmp, model);
 
-    /* zbuffer allocated on stack - max 1920x1080 */
-    uint32_t zbuf[1920*1080];
     renderer_t rr;
-    renderer_init(&rr, zbuf, rw, rh);
+    renderer_init(&rr, g_teapot_zbuf, rw, rh);
     renderer_clear(&rr, 0xFF181818);
     renderer_draw_mesh(&rr, mvp, gTris, gTriCount, 0xFFCC8844);
 }
