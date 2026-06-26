@@ -15,12 +15,15 @@
 #include "drivers/storage/storage.h"
 #include "kernel/security/security.h"
 #include <string.h>
+#include <stdint.h>
+
+extern volatile uint64_t timer_ticks;
 
 extern void bcc_main(char* args);
 extern void brun_main(char* args);
 
 static const char* commands[] = {
-    "help", "about", "clear", "reboot", "shutdown", 
+    "help", "about", "clear", "timer_test", "reboot", "shutdown", 
     "ls", "rm", "mkdir", "cd", "pwd", "cat", 
     "touch", "rmdir", "gui", "pcilist", "meminfo", 
     "syscheck", "uptime", "hexdump", "gpu_3d",
@@ -225,6 +228,7 @@ void execute_command(char* input) {
         print_string("    help             - Show this help message\n");
         print_string("    about            - About BEDI OS\n");
         print_string("    clear            - Clear the screen\n");
+        print_string("    timer_test       - Check system timer frequency\n");
         print_string("    reboot           - Reboot the computer\n");
         print_string("    shutdown         - Power off the computer\n");
         print_string("    uptime           - Show system uptime\n");
@@ -477,6 +481,23 @@ void execute_command(char* input) {
         swap_buffers();
         clear_screen();
         swap_buffers();
+    } else if (strcmp(input, "timer_test") == 0) {
+        uint64_t start = timer_ticks;
+        print_string("\n  Timer test: waiting 3 seconds...\n");
+        for (volatile long i = 0; i < 300000000L; i++) {
+            if (timer_ticks - start >= 3000) break;
+        }
+        uint64_t elapsed = timer_ticks - start;
+        print_string("  Elapsed ticks: ");
+        char buf[32]; itoa((uint64_t)elapsed, buf); print_string(buf);
+        print_string("\n");
+        if (elapsed >= 2500 && elapsed <= 3500) {
+            print_string("  Result: Timer is close to 1kHz (expected ~3000 ticks in 3s)\n");
+        } else if (elapsed < 10) {
+            print_string("  Result: Timer may not be ticking!\n");
+        } else {
+            print_string("  Result: Timer rate differs from expected 1kHz\n");
+        }
     } else if (strcmp(input, "gui") == 0) {
         extern void start_gui();
         start_gui();
