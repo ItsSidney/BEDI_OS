@@ -81,5 +81,6 @@ int gpu_accel_blit(void* src, int sx, int sy, int dx, int dy, int w, int h);
 int gpu_accel_blend(void* src, int dx, int dy, int w, int h, int alpha);
 int gpu_accel_3d_test(void);
 uint32_t gpu_get_capabilities(void);
+void gpu_present(void);
 
 #endif

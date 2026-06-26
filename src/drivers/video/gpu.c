@@ -1,5 +1,7 @@
 #include "drivers/video/gpu.h"
 #include "drivers/bus/pci.h"
+#include "drivers/video/framebuffer.h"
+#include "drivers/video/gfx.h"
 #include "kernel/mem/vmm.h"
 
 extern gpu_driver_t intel_gpu_driver;
@@ -141,14 +143,16 @@ void gpu_init(void) {
 gpu_device_t* gpu_get_primary(void) { return has_gpu ? &primary_gpu : NULL; }
 
 int gpu_accel_fill(int x, int y, int w, int h, uint32_t color) {
-    if (!has_gpu || !primary_gpu.driver || !primary_gpu.driver->accel_2d) return -1;
-    gpu_2d_params_t p = { .op = GPU_OP_FILL, .dst_x = x, .dst_y = y, .width = w, .height = h, .color = color };
-    return primary_gpu.driver->accel_2d(&primary_gpu, &p);
+    gfx_fill_rect(x, y, w, h, color);
+    return 0;
 }
 
 int gpu_accel_blend(void* src, int dx, int dy, int w, int h, int alpha) {
-    if (!has_gpu || !primary_gpu.driver || !primary_gpu.driver->accel_2d) return -1;
     gpu_2d_params_t p = { .op = GPU_OP_BLEND, .dst_x = dx, .dst_y = dy, .width = w, .height = h, .src_ptr = src, .alpha = alpha };
+    if (!has_gpu || !primary_gpu.driver || !primary_gpu.driver->accel_2d) {
+        // software blend fallback would go here; currently unused
+        return -1;
+    }
     return primary_gpu.driver->accel_2d(&primary_gpu, &p);
 }
 
@@ -160,4 +164,9 @@ uint32_t gpu_get_capabilities(void) {
 int gpu_accel_3d_test(void) {
     if (!has_gpu || !primary_gpu.driver || !primary_gpu.driver->accel_3d) return -1;
     return primary_gpu.driver->accel_3d(&primary_gpu, NULL, 0);
+}
+
+void gpu_present(void) {
+    if (!has_gpu || !primary_gpu.driver || !primary_gpu.driver->flip) return;
+    primary_gpu.driver->flip(&primary_gpu);
 }

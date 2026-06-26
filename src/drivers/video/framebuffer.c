@@ -1,4 +1,5 @@
 #include "drivers/video/framebuffer.h"
+#include "drivers/video/gpu.h"
 #include "gui/font.h"
 #include "kernel/log.h"
 #include <string.h>
@@ -68,6 +69,7 @@ void swap_buffers() {
         dest_row = (uint32_t*)((uintptr_t)dest_row + fb_pitch);
         src_row += INTERNAL_STRIDE;
     }
+    gpu_present();
 }
 
 extern int gui_terminal_active;

@@ -181,13 +181,38 @@ static int virtio_gpu_accel_3d(gpu_device_t* gpu, void* cmd_buffer, size_t size)
     return 0; // Success
 }
 
-static uint32_t virtio_gpu_get_caps(gpu_device_t* gpu) { 
+static uint32_t virtio_gpu_get_caps(gpu_device_t* gpu) {
     (void)gpu;
-    return GPU_CAP_2D | GPU_CAP_3D; 
+    return GPU_CAP_2D | GPU_CAP_3D;
+}
+
+static int virtio_gpu_set_mode(gpu_device_t* gpu, int width, int height, int bpp) {
+    (void)gpu; (void)width; (void)height; (void)bpp;
+    return 0; // Mode already set by firmware/Limine
+}
+
+static void* virtio_gpu_get_framebuffer(gpu_device_t* gpu) {
+    return (void*)gpu->fb_base;
+}
+
+static void virtio_gpu_flip(gpu_device_t* gpu) {
+    if (!gpu->initialized) return;
+    struct virtio_gpu_resource_flush flush = {0};
+    flush.hdr.type = VIRTIO_GPU_CTRL_RESOURCE_FLUSH;
+    flush.resource_id = main_resource_id;
+    flush.r.x = 0;
+    flush.r.y = 0;
+    flush.r.width = gpu->width;
+    flush.r.height = gpu->height;
+    struct virtio_gpu_ctrl_hdr resp = {0};
+    virtio_gpu_send_cmd(&flush, sizeof(flush), &resp, sizeof(resp));
 }
 
 gpu_driver_t virtio_gpu_driver = {
     .init = virtio_gpu_init,
+    .set_mode = virtio_gpu_set_mode,
+    .get_framebuffer = virtio_gpu_get_framebuffer,
+    .flip = virtio_gpu_flip,
     .accel_2d = virtio_gpu_accel_2d,
     .accel_3d = virtio_gpu_accel_3d,
     .get_caps = virtio_gpu_get_caps

@@ -164,16 +164,34 @@ static int intel_accel_3d(gpu_device_t* gpu, void* cmd_buffer, size_t size) {
     return 0; // Success
 }
 
-static uint32_t intel_get_caps(gpu_device_t* gpu) { 
+static uint32_t intel_get_caps(gpu_device_t* gpu) {
     // HD 520 (0x1916), HD 620 (0x5916)
     if (gpu->device_id == 0x1916 || gpu->device_id == 0x5916) {
         return GPU_CAP_2D | GPU_CAP_3D;
     }
-    return GPU_CAP_2D; 
+    return GPU_CAP_2D;
 }
+
+static int intel_set_mode(gpu_device_t* gpu, int width, int height, int bpp) {
+    (void)gpu; (void)width; (void)height; (void)bpp;
+    return 0; // Mode already set by firmware/Limine
+}
+
+static void* intel_get_framebuffer(gpu_device_t* gpu) {
+    return (void*)gpu->fb_base;
+}
+
+static void intel_flip(gpu_device_t* gpu) {
+    (void)gpu;
+    // Software fallback: framebuffer.c swap_buffers already copies back_buffer -> front buffer
+}
+
 
 gpu_driver_t intel_gpu_driver = {
     .init = intel_init,
+    .set_mode = intel_set_mode,
+    .get_framebuffer = intel_get_framebuffer,
+    .flip = intel_flip,
     .accel_2d = intel_accel_2d,
     .accel_3d = intel_accel_3d,
     .get_caps = intel_get_caps
