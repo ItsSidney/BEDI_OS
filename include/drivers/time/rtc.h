@@ -12,5 +12,6 @@ typedef struct {
 
 void get_time(time_t* t);
 void set_time_offset(int hours, int minutes);
+int is_updating(void);
 
 #endif

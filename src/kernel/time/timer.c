@@ -42,14 +42,15 @@ uint32_t timer_get_ms(void) {
 
 void timer_calibrate(void) {
     // Measure ticks over exactly 3 RTC seconds.
+    while (is_updating());
     unsigned char base = read_cmos(0x00);
     // Wait for start of next second.
-    while (read_cmos(0x00) == base);
+    do { while (is_updating()); } while (read_cmos(0x00) == base);
     uint64_t start = timer_ticks;
     unsigned char target = read_cmos(0x00);
     // Advance 3 seconds.
     for (int i = 0; i < 3; i++) {
-        while (read_cmos(0x00) == target);
+        do { while (is_updating()); } while (read_cmos(0x00) == target);
         target = read_cmos(0x00);
     }
     uint64_t elapsed = timer_ticks - start;

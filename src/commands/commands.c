@@ -495,11 +495,21 @@ void execute_command(char* input) {
         itoa((uint64_t)timer_hz, buf); print_string(buf);
         print_string("\n");
         if (elapsed >= 2500 && elapsed <= 3500) {
-            print_string("  Result: Timer is close to 1kHz (expected ~3000 ticks in 3s)\n");
+            print_string("  Result: Timer is close to 1kHz\n");
         } else if (elapsed < 10) {
             print_string("  Result: Timer may not be ticking!\n");
         } else {
             print_string("  Result: Timer rate differs from expected 1kHz\n");
+            // Self-correct: estimate Hz from this measurement
+            if (elapsed > 100) {
+                uint32_t estimated = (uint32_t)(elapsed / 3);
+                if (estimated > 10 && estimated < 10000) {
+                    timer_hz = estimated;
+                    print_string("  Adjusted Hz to: ");
+                    itoa((uint64_t)timer_hz, buf); print_string(buf);
+                    print_string("\n  Future sleep_ms() calls will use this rate.\n");
+                }
+            }
         }
     } else if (strcmp(input, "gui") == 0) {
         extern void start_gui();
