@@ -55,11 +55,13 @@ int fs_set_flags(const char* filename, uint8_t flags);
 // New expanded API
 int fs_get_home_dir();
 int fs_get_trash_dir();
+int fs_get_desktop_dir();
 int fs_trash_file(const char* filename);
 int fs_empty_trash();
 int fs_restore_from_trash(const char* filename);
 int fs_get_free_count();
 int fs_copy_file(const char* src_name, const char* dst_name);
+int fs_copy_file_to_dir(int src_dir, const char* src_name, int dst_dir, const char* dst_name);
 int fs_get_dir_count(int dir_idx);
 int fs_find_child(int dir_idx, int child_idx);
 void fs_get_permission_string(uint8_t flags, char* out);

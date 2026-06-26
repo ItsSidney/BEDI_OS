@@ -8,6 +8,7 @@
 #include "drivers/video/framebuffer.h"
 #include <string.h>
 #include <stdint.h>
+#include "kernel/lib/stdio.h"
 
 #define E1000_REG_CTRL      0x0000
 #define E1000_REG_STATUS    0x0008
@@ -36,9 +37,10 @@
 #define RCTL_UPE            (1 << 3)
 #define RCTL_MPE            (1 << 4)
 #define RCTL_LBM_NONE       (0 << 6)
+#define RCTL_LBM_MAC        (1 << 6)
 #define RCTL_RDMTS_HALF     (0 << 8)
 #define RCTL_BAM            (1 << 15)
-#define RCTL_SZ_2048        (0 << 16)
+#define RCTL_SZ_2048        (3 << 16)
 #define RCTL_SECRC          (1 << 26)
 
 #define TCTL_EN             (1 << 1)
@@ -169,8 +171,26 @@ static int e1000_init(struct ifnet* ifp) {
     uint32_t rah;
     memcpy(&ral, &ifp->if_hwaddr[0], 4);
     memcpy(&rah, &ifp->if_hwaddr[4], 2);
+    {
+        char dbg[64];
+        snprintf(dbg, sizeof(dbg), "  E1000: MAC=%02x:%02x:%02x:%02x:%02x:%02x\n",
+            ifp->if_hwaddr[0], ifp->if_hwaddr[1], ifp->if_hwaddr[2],
+            ifp->if_hwaddr[3], ifp->if_hwaddr[4], ifp->if_hwaddr[5]);
+//        print_string(dbg);
+    }
     e1000_write(sc, E1000_REG_RAL, ral);
     e1000_write(sc, E1000_REG_RAH, rah | 0x80000000);
+
+    // Clear other receive address registers (RAL1-RAL15)
+    for (int i = 1; i < 16; i++) {
+        e1000_write(sc, E1000_REG_RAL + i * 8, 0);
+        e1000_write(sc, E1000_REG_RAH + i * 8, 0);
+    }
+
+    // Clear Multicast Table Array (MTA)
+    for (int i = 0; i < 128; i++) {
+        e1000_write(sc, E1000_REG_MTA + i * 4, 0);
+    }
 
     // Multi-cast table
 
@@ -180,7 +200,23 @@ static int e1000_init(struct ifnet* ifp) {
     e1000_write(sc, E1000_REG_RDLEN, RX_DESC_COUNT * sizeof(struct e1000_rx_desc));
     e1000_write(sc, E1000_REG_RDH, 0);
     e1000_write(sc, E1000_REG_RDT, RX_DESC_COUNT - 1);
-    e1000_write(sc, E1000_REG_RCTL, RCTL_EN | RCTL_SBP | RCTL_UPE | RCTL_MPE | RCTL_BAM | RCTL_SZ_2048 | RCTL_SECRC);
+    uint32_t rctl_val = RCTL_EN | RCTL_SBP | RCTL_UPE | RCTL_MPE | RCTL_BAM | RCTL_SZ_2048 | RCTL_SECRC;
+    e1000_write(sc, E1000_REG_RCTL, rctl_val);
+    uint32_t rctl_check = e1000_read(sc, E1000_REG_RCTL);
+    if (rctl_check != rctl_val) {
+        char dbg[64];
+        snprintf(dbg, sizeof(dbg), "  E1000: RCTL mismatch! wrote 0x%08X got 0x%08X\n", rctl_val, rctl_check);
+//        print_string(dbg);
+    } else {
+//        print_string("  E1000: RCTL OK\n");
+    }
+    // Final check before return
+    uint32_t rctl_final = e1000_read(sc, E1000_REG_RCTL);
+    if (rctl_final != rctl_val) {
+        char dbg[64];
+        snprintf(dbg, sizeof(dbg), "  E1000: RCTL CHANGED at init end! was 0x%08X now 0x%08X\n", rctl_val, rctl_final);
+//        print_string(dbg);
+    }
 
     uint64_t tx_phys = vmm_get_phys((uint64_t)sc->tx_descs);
 
@@ -263,9 +299,38 @@ static int e1000_output(struct ifnet* ifp, struct mbuf* m) {
 
 void e1000_poll(struct ifnet* ifp) {
     struct e1000_softc* sc = ifp->if_softc;
-    int max_packets = 32;
+    /* Force correct RCTL value */
+    uint32_t correct_rctl = RCTL_EN | RCTL_SBP | RCTL_UPE | RCTL_MPE | RCTL_BAM | RCTL_SZ_2048 | RCTL_SECRC;
+    uint32_t current_rctl = e1000_read(sc, E1000_REG_RCTL);
+    if (current_rctl != correct_rctl) {
+        e1000_write(sc, E1000_REG_RCTL, current_rctl & ~RCTL_EN);
+        for (volatile int i = 0; i < 10000; i++) __asm__("pause");
+        e1000_write(sc, E1000_REG_RCTL, correct_rctl);
+        sc->rx_cur = 0;
+        e1000_write(sc, E1000_REG_RDH, 0);
+        e1000_write(sc, E1000_REG_RDT, RX_DESC_COUNT - 1);
+    }
 
-    while ((sc->rx_descs[sc->rx_cur].status & 0x1) && max_packets-- > 0) {
+    /* RDH-driven receive loop */
+    uint32_t rdh = e1000_read(sc, E1000_REG_RDH);
+    uint32_t rdt = e1000_read(sc, E1000_REG_RDT);
+    int max_packets = 32;
+    int got = 0;
+    while (got < max_packets) {
+        if (sc->rx_cur == rdh) break;
+        if (sc->rx_cur == rdt) {
+            sc->rx_cur = (rdh + 1) % RX_DESC_COUNT;
+            rdh = e1000_read(sc, E1000_REG_RDH);
+            rdt = e1000_read(sc, E1000_REG_RDT);
+            continue;
+        }
+        if (!(sc->rx_descs[sc->rx_cur].status & 0x1)) {
+            sc->rx_cur = (sc->rx_cur + 1) % RX_DESC_COUNT;
+            rdh = e1000_read(sc, E1000_REG_RDH);
+            rdt = e1000_read(sc, E1000_REG_RDT);
+            continue;
+        }
+        got++;
         uint16_t len = sc->rx_descs[sc->rx_cur].len;
 
         struct mbuf* m = m_getcl(MT_DATA);
@@ -277,11 +342,13 @@ void e1000_poll(struct ifnet* ifp) {
             m->m_flags |= M_PKTHDR;
             ether_input(ifp, m);
         }
-        
+
         sc->rx_descs[sc->rx_cur].status = 0;
         uint16_t old_cur = sc->rx_cur;
         sc->rx_cur = (sc->rx_cur + 1) % RX_DESC_COUNT;
         e1000_write(sc, E1000_REG_RDT, old_cur);
+        rdh = e1000_read(sc, E1000_REG_RDH);
+        rdt = e1000_read(sc, E1000_REG_RDT);
     }
 }
 

@@ -83,10 +83,8 @@ static uint32_t parse_ip(const char* s) {
 }
 
 static const char* strip_url_scheme(const char* host) {
-    if (strncmp(host, "https://", 8) == 0) return host + 8;
     if (strncmp(host, "http://", 7) == 0) return host + 7;
     if (strncmp(host, "HTTP://", 7) == 0) return host + 7;
-    if (strncmp(host, "HTTPS://", 8) == 0) return host + 8;
     return host;
 }
 

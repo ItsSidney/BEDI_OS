@@ -424,6 +424,10 @@ void gfx_draw_line(int x0, int y0, int x1, int y1, uint32_t rgb) {
     }
 }
 
+void gfx_draw_line_aa(int x0, int y0, int x1, int y1, uint32_t rgb) {
+    gfx_draw_line(x0, y0, x1, y1, rgb);
+}
+
 void gfx_draw_window(int x, int y, int w, int h, const char* title, uint32_t accent_color) {
     gfx_draw_window_custom(x, y, w, h, title, accent_color, 0);
 }
@@ -443,7 +447,95 @@ void gfx_draw_window_custom(int x, int y, int w, int h, const char* title, uint3
 }
 
 void gfx_draw_rect_rounded_outline(int x, int y, int w, int h, int r, int t, uint32_t rgb) {
-    gfx_draw_rect_outline(x, y, w, h, t, rgb);
+    if (r < 1 || w <= r * 2 || h <= r * 2) { gfx_draw_rect_outline(x, y, w, h, t, rgb); return; }
+    uint32_t pixel = gfx_rgb_to_pixel(rgb);
+    uint32_t fw = gfx_get_fb_width();
+    uint32_t fh = gfx_get_fb_height();
+    uint32_t stride = gfx_get_stride();
+    uint32_t* bb = gfx_get_back_buffer();
+
+    for (int px = x; px < x + w; px++) {
+        if (px < 0 || (uint32_t)px >= fw) continue;
+        int rel_x = px - x;
+        int in_corner_l = (rel_x < r);
+        int in_corner_r = (rel_x >= w - r);
+        for (int ty = 0; ty < t; ty++) {
+            // Top edge
+            int py_top = y + ty;
+            int py_bot = y + h - 1 - ty;
+            if (py_top >= 0 && (uint32_t)py_top < fh) {
+                if (in_corner_l) {
+                    int dx = r - rel_x;
+                    if (dx * dx + (r - 1 - ty) * (r - 1 - ty) <= r * r &&
+                        dx * dx + (r - ty) * (r - ty) > (r - 1) * (r - 1))
+                        bb[py_top * stride + px] = pixel;
+                } else if (in_corner_r) {
+                    int dx = rel_x - (w - r - 1);
+                    if (dx * dx + (r - 1 - ty) * (r - 1 - ty) <= r * r &&
+                        dx * dx + (r - ty) * (r - ty) > (r - 1) * (r - 1))
+                        bb[py_top * stride + px] = pixel;
+                } else {
+                    bb[py_top * stride + px] = pixel;
+                }
+            }
+            // Bottom edge
+            if (py_bot >= 0 && (uint32_t)py_bot < fh) {
+                if (in_corner_l) {
+                    int dx = r - rel_x;
+                    if (dx * dx + (r - 1 - ty) * (r - 1 - ty) <= r * r &&
+                        dx * dx + (r - ty) * (r - ty) > (r - 1) * (r - 1))
+                        bb[py_bot * stride + px] = pixel;
+                } else if (in_corner_r) {
+                    int dx = rel_x - (w - r - 1);
+                    if (dx * dx + (r - 1 - ty) * (r - 1 - ty) <= r * r &&
+                        dx * dx + (r - ty) * (r - ty) > (r - 1) * (r - 1))
+                        bb[py_bot * stride + px] = pixel;
+                } else {
+                    bb[py_bot * stride + px] = pixel;
+                }
+            }
+        }
+    }
+    for (int py = y; py < y + h; py++) {
+        if (py < 0 || (uint32_t)py >= fh) continue;
+        int rel_y = py - y;
+        int in_corner_t = (rel_y < r);
+        int in_corner_b = (rel_y >= h - r);
+        for (int tx = 0; tx < t; tx++) {
+            int px_l = x + tx;
+            int px_r = x + w - 1 - tx;
+            if (px_l >= 0 && (uint32_t)px_l < fw) {
+                if (in_corner_t) {
+                    int dy = r - rel_y;
+                    if (dy * dy + (r - 1 - tx) * (r - 1 - tx) <= r * r &&
+                        dy * dy + (r - tx) * (r - tx) > (r - 1) * (r - 1))
+                        bb[py * stride + px_l] = pixel;
+                } else if (in_corner_b) {
+                    int dy = rel_y - (h - r - 1);
+                    if (dy * dy + (r - 1 - tx) * (r - 1 - tx) <= r * r &&
+                        dy * dy + (r - tx) * (r - tx) > (r - 1) * (r - 1))
+                        bb[py * stride + px_l] = pixel;
+                } else {
+                    bb[py * stride + px_l] = pixel;
+                }
+            }
+            if (px_r >= 0 && (uint32_t)px_r < fw) {
+                if (in_corner_t) {
+                    int dy = r - rel_y;
+                    if (dy * dy + (r - 1 - tx) * (r - 1 - tx) <= r * r &&
+                        dy * dy + (r - tx) * (r - tx) > (r - 1) * (r - 1))
+                        bb[py * stride + px_r] = pixel;
+                } else if (in_corner_b) {
+                    int dy = rel_y - (h - r - 1);
+                    if (dy * dy + (r - 1 - tx) * (r - 1 - tx) <= r * r &&
+                        dy * dy + (r - tx) * (r - tx) > (r - 1) * (r - 1))
+                        bb[py * stride + px_r] = pixel;
+                } else {
+                    bb[py * stride + px_r] = pixel;
+                }
+            }
+        }
+    }
 }
 
 void gfx_draw_button(int x, int y, int w, int h, const char* label, uint32_t bg, uint32_t fg, int hover) {

@@ -35,6 +35,8 @@ typedef struct {
     int flags;
     int z_order;
     
+    int desktop;  // Virtual desktop this window belongs to
+    
     // Close button hit area
     int close_btn_x, close_btn_y, close_btn_w, close_btn_h;
 
@@ -110,5 +112,9 @@ wm_window_t* wm_get_window_by_index(int index);
 
 // Bring window to front
 void wm_bring_to_front(int win_id);
+
+// Virtual desktop support
+int wm_get_current_desktop(void);
+void wm_set_current_desktop(int d);
 
 #endif

@@ -63,7 +63,7 @@ void ip_input(struct mbuf* m) {
     int hlen;
     
     if (m->m_len < sizeof(struct ip)) {
-        print_string("  IP: Packet too short for IP header\n");
+//        print_string("  IP: Packet too short for IP header\n");
         m_freem(m);
         return;
     }
@@ -71,14 +71,14 @@ void ip_input(struct mbuf* m) {
     ip = (struct ip*)m->m_data;
     
     if (ip->ip_v != 4) {
-        print_string("  IP: Not IPv4\n");
+//        print_string("  IP: Not IPv4\n");
         m_freem(m);
         return;
     }
     
     hlen = ip->ip_hl << 2;
     if (hlen < sizeof(struct ip)) {
-        print_string("  IP: Invalid header length\n");
+//        print_string("  IP: Invalid header length\n");
         m_freem(m);
         return;
     }
@@ -102,7 +102,7 @@ void ip_input(struct mbuf* m) {
             udp_input(m, hlen);
             break;
         default:
-            print_string("  IP: Unknown proto\n");
+//            print_string("  IP: Unknown proto\n");
             m_freem(m);
             break;
     }
@@ -118,7 +118,7 @@ int ip_output(struct mbuf* m, struct ifnet* ifp) {
     }
     
     if (ifp == NULL) {
-        print_string("  IP: No interface found, dropping packet\n");
+//        print_string("  IP: No interface found, dropping packet\n");
         m_freem(m);
         return -1;
     }

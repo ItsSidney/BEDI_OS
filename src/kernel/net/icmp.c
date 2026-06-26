@@ -47,11 +47,11 @@ void icmp_input(struct mbuf* m, int off) {
         
         ip_output(m, NULL);
     } else if (icp->icmp_type == ICMP_ECHOREPLY) {
-        print_string("  Reply received from ");
+//        print_string("  Reply received from ");
         char buf[16];
         itoa(ntohl(ip->ip_src.s_addr), buf);
-        print_string(buf);
-        print_string("!\n");
+//        print_string(buf);
+//        print_string("!\n");
         m_freem(m);
     } else {
         m_freem(m);

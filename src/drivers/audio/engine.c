@@ -50,6 +50,15 @@ void audio_init(void) {
 void audio_set_mute(int mute) { g_audio_muted = mute; }
 int audio_is_muted() { return g_audio_muted; }
 
+int g_audio_master_volume = 80; /* 0-100 */
+
+void audio_set_master_volume(int volume) {
+    if (volume < 0) volume = 0;
+    if (volume > 100) volume = 100;
+    g_audio_master_volume = volume;
+}
+int audio_get_master_volume(void) { return g_audio_master_volume; }
+
 uint32_t audio_get_note_freq(int note_num) {
     static const uint32_t scale[] = { NOTE_C4, NOTE_D4, NOTE_E4, NOTE_F4, NOTE_G4, NOTE_A4, NOTE_B4, NOTE_C5, NOTE_D5 };
     if (note_num >= 1 && note_num <= 9) return scale[note_num - 1];
@@ -84,11 +93,6 @@ void audio_play_note(int channel, wave_type_t type, uint32_t freq, uint32_t vol,
     g_channels[channel].phase = 0;
     g_channels[channel].lfo_phase = 0;
     g_channels[channel].active = 1;
-    
-    if (!g_audio_muted) {
-        extern void speaker_play_freq(uint32_t freq);
-        speaker_play_freq(freq);
-    }
 }
 
 void audio_stop_channel(int channel) {
@@ -130,10 +134,6 @@ void audio_update() {
                 break;
         }
         if (g_channels[i].active) any_active = 1;
-    }
-    if (!any_active || g_audio_muted) {
-        extern void speaker_stop(void);
-        speaker_stop();
     }
 }
 
@@ -181,5 +181,38 @@ int16_t audio_mix_next_sample(void) {
     }
     
     if (mixed > 32767) mixed = 32767; else if (mixed < -32768) mixed = -32768;
+    if (g_audio_master_volume != 100) {
+        mixed = (mixed * g_audio_master_volume) / 100;
+        if (mixed > 32767) mixed = 32767; else if (mixed < -32768) mixed = -32768;
+    }
     return (int16_t)mixed;
+}
+
+// ── Hardware Sync ─────────────────────────────────────────────
+// Called from the main GUI loop to drive the PC speaker from the
+// currently active audio channel, respecting global master volume/mute.
+void audio_hardware_sync(void) {
+    extern void speaker_play_freq(uint32_t freq);
+    extern void speaker_stop(void);
+
+    if (g_audio_muted || g_audio_master_volume == 0) {
+        speaker_stop();
+        return;
+    }
+
+    int best = -1;
+    uint32_t best_time = 0;
+    for (int i = 0; i < AUDIO_MAX_CHANNELS; i++) {
+        if (!g_channels[i].active) continue;
+        if (best < 0 || g_channels[i].start_ticks > best_time) {
+            best = i;
+            best_time = g_channels[i].start_ticks;
+        }
+    }
+
+    if (best < 0) {
+        speaker_stop();
+    } else {
+        speaker_play_freq(g_channels[best].frequency);
+    }
 }

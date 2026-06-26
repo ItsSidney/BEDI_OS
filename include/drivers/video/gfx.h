@@ -103,6 +103,7 @@ void gfx_blend_pixel(int x, int y, uint32_t rgb, uint8_t alpha);
 
 // Lines & circles
 void gfx_draw_line(int x0, int y0, int x1, int y1, uint32_t rgb);
+void gfx_draw_line_aa(int x0, int y0, int x1, int y1, uint32_t rgb);
 void gfx_draw_hline(int x, int y, int w, uint32_t rgb);
 void gfx_draw_vline(int x, int y, int h, uint32_t rgb);
 void gfx_draw_circle(int cx, int cy, int r, uint32_t rgb);

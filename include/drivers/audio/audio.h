@@ -72,6 +72,13 @@ void audio_stop_channel(int channel);
 // Called by the timer or a dedicated audio interrupt
 int16_t audio_mix_next_sample(void);
 
+// Master Volume
+void audio_set_master_volume(int volume); // 0-100
+int audio_get_master_volume(void);
+
+// Hardware sync: drive PC speaker from active channel state
+void audio_hardware_sync(void);
+
 // ── Testing ─────────────────────────────────────────────────
 void audio_test_sequence(void);
 

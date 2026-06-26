@@ -71,9 +71,9 @@ function build() {
         mkdir -p "$(dirname "$obj")"
         
         echo "  CC $src -> $obj"
-        # Enable optimizations for crypto and networking to speed up math
-        if [[ "$src" == *"crypto"* ]] || [[ "$src" == *"net"* ]]; then
-            $CC $CFLAGS -O2 -mno-sse -mno-sse2 $src -o $obj
+        # Enable optimizations for networking to speed up math
+        if [[ "$src" == *"net"* ]]; then
+            $CC $CFLAGS -O0 -mno-sse -mno-sse2 $src -o $obj
         else
             $CC $CFLAGS $src -o $obj
         fi
@@ -165,6 +165,20 @@ case "$1" in
         ;;
     "run"|"-r"|"--run")
         run
+        ;;
+    "log")
+        if [ ! -f $ISO_NAME ]; then build; fi
+        echo "[RUN] Launching QEMU with serial log to bedi_qemu.log..."
+        QEMU="qemu-system-x86_64"
+        QFLAGS="-cdrom $ISO_NAME -m 2G -smp 4 -serial file:bedi_qemu.log -display none"
+        QFLAGS="$QFLAGS -net nic,model=e1000 -net user"
+        if [ -e /dev/kvm ]; then QFLAGS="$QFLAGS -cpu host -enable-kvm"; else QFLAGS="$QFLAGS -cpu qemu64"; fi
+        $QEMU $QFLAGS &
+        QPID=$!
+        echo "[RUN] PID $QPID — logging..."
+        sleep 90
+        kill $QPID 2>/dev/null; wait $QPID 2>/dev/null
+        echo "[RUN] Log saved to bedi_qemu.log (lines: $(wc -l < bedi_qemu.log))"
         ;;
     "help"|*)
         echo "Usage: $0 {build|clean|run|help}"

@@ -8,6 +8,11 @@ void gui_shell(void);
 void draw_premium_wallpaper(void);
 void draw_taskbar(void);
 void desktop_tick(void);
+void desk_add_app_icon(int app_idx);
+void desk_add_file_icon(const char* path, const char* display_name);
+void desk_remove_icon_by_path(const char* path);
+void desk_add_app_icon(int app_idx);
+void desk_add_file_icon(const char* path, const char* display_name);
 
 // Personalization
 typedef struct {
@@ -19,6 +24,7 @@ typedef struct {
     int font_shadow;          // 0/1
     int window_transparency;  // 0-255
     int compact_mode;         // 0/1
+    int system_volume;        // 0-100
 } personalization_t;
 
 personalization_t* get_personalization(void);
@@ -30,6 +36,8 @@ void show_time_settings(void);
 void show_sound_settings(void);
 void gui_system_shutdown(void);
 void gui_toggle_start_menu(void);
+int gui_is_topbar_cfg_open(void);
+void gui_handle_topbar_cfg_key(char key);
 
 // Apps
 void process_viewer_app(void);

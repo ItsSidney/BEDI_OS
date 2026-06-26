@@ -44,7 +44,5 @@ void play_beep() {
 // Integration with Audio Engine:
 // Since we don't have a DAC (like AC97) yet, we map the first active
 // channel of the engine to the physical speaker.
-void audio_hardware_sync() {
-    // This would be called in the timer loop
-    // For now, we'll just use it to play the "main" note
-}
+// audio_hardware_sync is implemented in engine.c and selects the
+// dominant active channel to drive the PC speaker.

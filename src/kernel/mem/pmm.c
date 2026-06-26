@@ -8,12 +8,12 @@ extern uint64_t hhdm_offset;
 static uint64_t* free_pages_stack;
 static size_t free_pages_count = 0;
 
-extern void serial_puts(const char* s);
+//extern void serial_puts(const char* s);
 
 void pmm_init(void) {
-    serial_puts("[PMM] Initializing...\n");
+//    serial_puts("[PMM] Initializing...\n");
     if (memmap_request.response == NULL) {
-        serial_puts("[PMM] ERROR: No memmap response\n");
+//        serial_puts("[PMM] ERROR: No memmap response\n");
         return;
     }
 
@@ -30,21 +30,21 @@ void pmm_init(void) {
         struct limine_memmap_entry* entry = memmap_request.response->entries[i];
         if (entry->type == LIMINE_MEMMAP_USABLE && entry->length >= total_pages * sizeof(uint64_t)) {
             free_pages_stack = (uint64_t*)(entry->base + hhdm_offset);
-            serial_puts("[PMM] Selected stack at: 0x");
+//            serial_puts("[PMM] Selected stack at: 0x");
             
             char hex[20];
             const char* hex_chars = "0123456789ABCDEF";
             uint64_t addr = (uint64_t)free_pages_stack;
             for (int j = 0; j < 16; j++) hex[15-j] = hex_chars[(addr >> (j * 4)) & 0x0F];
             hex[16] = 0;
-            serial_puts(hex);
-            serial_puts("\n");
+//            serial_puts(hex);
+//            serial_puts("\n");
             break;
         }
     }
 
     if (free_pages_stack == NULL) {
-        serial_puts("[PMM] FATAL: Could not find usable memory for page stack\n");
+//        serial_puts("[PMM] FATAL: Could not find usable memory for page stack\n");
         return;
     }
 

@@ -143,7 +143,10 @@ static void iv_render(int id, int x, int y, int w, int h, int vx, int vy) {
     int view_h = h - 16;
 
     // ── File list panel ──
-    int fy = y + 4;
+    gfx_fill_rect_rounded(x + 2, y, LIST_W - 2, 20, 4, 0x15171D);
+    gfx_draw_string_transparent(x + 6, y + 3, "BMP Files", 0x6D7079);
+    gfx_draw_hline(x + 2, y + 19, LIST_W - 4, 0x262830);
+    int fy = y + 22;
     for (int i = 0; i < bmp_count; i++) {
         int iy = fy + i * 20;
         if (iy + 20 > y + h) break;
@@ -153,9 +156,9 @@ static void iv_render(int id, int x, int y, int w, int h, int vx, int vy) {
             load_file(bmp_names[i]);
             mclick = 0;
         }
-        uint32_t bg = (i == sel_idx) ? 0x262830 : (hover ? 0x1D1F26 : 0x0D0E12);
-        gfx_fill_rect(x + 4, iy, LIST_W - 8, 18, bg);
-        gfx_draw_string_transparent(x + 8, iy + 2, bmp_names[i], (i == sel_idx) ? 0xE4E6EA : 0x94979F);
+        uint32_t bg = (i == sel_idx) ? 0x1A437A : (hover ? 0x1D1F26 : 0x0D0E12);
+        gfx_fill_rect_rounded(x + 4, iy, LIST_W - 8, 18, 4, bg);
+        gfx_draw_string_transparent(x + 8, iy + 2, bmp_names[i], (i == sel_idx) ? 0xFFFFFF : 0x94979F);
     }
     gfx_draw_line(x + LIST_W, y, x + LIST_W, y + h, 0x262830);
 
@@ -179,10 +182,10 @@ static void iv_render(int id, int x, int y, int w, int h, int vx, int vy) {
         dx += view_x;
 
         // Draw outline around image
-        gfx_draw_rect_outline(dx - 1, dy - 1, dw + 2, dh + 2, 1, 0x383B44);
+        gfx_draw_rect_outline(dx - 2, dy - 2, dw + 4, dh + 4, 1, 0x2A2D35);
 
         // Checkerboard background for transparency indication on small images
-        if (dw < view_w && dh < view_h) {
+        if (dw < view_w - 4 && dh < view_h - 4) {
             for (int ck_y = 0; ck_y < dh; ck_y += 8) {
                 for (int ck_x = 0; ck_x < dw; ck_x += 8) {
                     int c = ((ck_x / 8 + ck_y / 8) & 1) ? 0x1D1F26 : 0x15171D;
@@ -196,28 +199,28 @@ static void iv_render(int id, int x, int y, int w, int h, int vx, int vy) {
         gfx_draw_rgb_bitmap_scaled(dx, dy, dw, dh, cur_img.pixels, cur_img.width, cur_img.height);
 
         // Status bar
+        int sb_y = y + h - 18;
+        gfx_fill_rect_rounded(view_x, sb_y, view_w, 18, 3, 0x15171D);
+        gfx_draw_hline(view_x, sb_y, view_w, 0x262830);
+
         char info[160];
         int si = 0;
         const char* fn = img_name;
         while (*fn) info[si++] = *fn++;
-        info[si++] = ' '; info[si++] = '(';
-        if (cur_img.width >= 100) info[si++] = '0' + cur_img.width / 100;
-        if (cur_img.width >= 10) info[si++] = '0' + (cur_img.width / 10) % 10;
-        info[si++] = '0' + cur_img.width % 10;
-        info[si++] = 'x';
-        if (cur_img.height >= 100) info[si++] = '0' + cur_img.height / 100;
-        if (cur_img.height >= 10) info[si++] = '0' + (cur_img.height / 10) % 10;
-        info[si++] = '0' + cur_img.height % 10;
-        info[si++] = ')';
-        int zoom_pct = (int)(scale * 100.0f + 0.5f);
         info[si++] = ' ';
-        if (zoom_pct >= 100) info[si++] = '0' + zoom_pct / 100;
-        if (zoom_pct >= 10) info[si++] = '0' + (zoom_pct / 10) % 10;
-        info[si++] = '0' + zoom_pct % 10;
-        info[si++] = '%';
-        if (fit_view) { info[si++] = ' '; info[si++] = '('; info[si++] = 'F'; info[si++] = 'i'; info[si++] = 't'; info[si++] = ')'; }
+        char dim[24]; int di = 0;
+        int imgw = cur_img.width, imgh = cur_img.height;
+        if (imgw >= 100) dim[di++] = '0'+imgw/100;
+        if (imgw >= 10) dim[di++] = '0'+(imgw/10)%10;
+        dim[di++] = '0'+imgw%10;
+        dim[di++] = 'x';
+        if (imgh >= 100) dim[di++] = '0'+imgh/100;
+        if (imgh >= 10) dim[di++] = '0'+(imgh/10)%10;
+        dim[di++] = '0'+imgh%10;
+        dim[di] = 0;
+        for (int j = 0; dim[j] && si < 156; j++) info[si++] = dim[j];
         info[si] = 0;
-        gfx_draw_string_transparent(view_x + 4, y + h - 16, info, 0x6D7079);
+        gfx_draw_string_transparent(view_x + 6, sb_y + 2, info, 0x6D7079);
     } else if (bmp_count == 0) {
         gfx_draw_string_transparent(view_x + (view_w - 120) / 2, y + h / 2 - 8, "No BMP files found", 0x6D7079);
     } else {
@@ -251,9 +254,9 @@ static void iv_on_key(int id, char key) {
         return;
     }
     // Fit to window
-    if (KEY_MATCH(key, '0')) {
-        fit_view = 1;
-        pan_x = 0; pan_y = 0;
+    if (KEY_MATCH(key, '0') || KEY_MATCH(key, 'f') || KEY_MATCH(key, 'F')) {
+        fit_view = !fit_view;
+        if (fit_view) { pan_x = 0; pan_y = 0; }
         return;
     }
     // Pan with arrow keys (only when not in fit view)

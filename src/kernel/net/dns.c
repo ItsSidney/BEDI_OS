@@ -102,7 +102,7 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
     int off = sizeof(struct dns_header);
     int enc_len = encode_dns_name(query + off, hostname);
     if (enc_len < 0) {
-        print_string("  DNS: Failed to encode hostname\n");
+//        print_string("  DNS: Failed to encode hostname\n");
         return -1;
     }
     off += enc_len;
@@ -113,16 +113,16 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
     query[off++] = DNS_CLASS_IN;
 
     uint16_t sport = 30000 + (query_id % 1000);
-    print_string("  DNS: Querying ");
-    print_string(hostname);
-    print_string(" -> ");
+//    print_string("  DNS: Querying ");
+//    print_string(hostname);
+//    print_string(" -> ");
     char buf[16];
     extern void itoa(uint64_t n, char* s);
-    itoa(ntohl(dns_server), buf); print_string(buf);
-    print_string("\n");
+//    itoa(ntohl(dns_server), buf); print_string(buf);
+//    print_string("\n");
 
     if (udp_output(dns_server, DNS_PORT, sport, query, off) < 0) {
-        print_string("  DNS: UDP send failed\n");
+//        print_string("  DNS: UDP send failed\n");
         return -1;
     }
 
@@ -149,7 +149,7 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
         uint16_t src_port;
         if (udp_recv(sport, &src_ip, &src_port, reply, &reply_len) == 0) {
             if (reply_len < sizeof(struct dns_header)) {
-                print_string("  DNS: Reply too short\n");
+//                print_string("  DNS: Reply too short\n");
                 return -1;
             }
 
@@ -158,15 +158,15 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
             uint16_t rcode  = rflags & DNS_FLAG_RCODE_MASK;
 
             if (rcode != 0) {
-                print_string("  DNS: Server error rcode=");
-                char rc[5]; itoa(rcode, rc); print_string(rc);
-                print_string("\n");
+//                print_string("  DNS: Server error rcode=");
+//                char rc[5]; itoa(rcode, rc); print_string(rc);
+//                print_string("\n");
                 return -1;
             }
 
             uint16_t ancount = ntohs(rh->ancount);
             if (ancount == 0) {
-                print_string("  DNS: No answers\n");
+//                print_string("  DNS: No answers\n");
                 return -1;
             }
 
@@ -183,12 +183,12 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
                 char tmp[256];
                 off = parse_dns_name(reply, reply_len, off, tmp, sizeof(tmp));
                 if (off < 0) {
-                    print_string("  DNS: parse_dns_name failed\n");
+//                    print_string("  DNS: parse_dns_name failed\n");
                     break;
                 }
                 
                 if (off + 10 > (int)reply_len) {
-                    print_string("  DNS: answer record truncated\n");
+//                    print_string("  DNS: answer record truncated\n");
                     break;
                 }
                 
@@ -199,11 +199,11 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
                 uint16_t rdlength = (reply[off] << 8) | reply[off + 1];
                 off += 2; // rdlength
                 
-                print_string("  DNS: record type=");
-                char tbuf[10]; itoa(type, tbuf); print_string(tbuf);
-                print_string(" rdlen=");
-                char rbuf[10]; itoa(rdlength, rbuf); print_string(rbuf);
-                print_string("\n");
+//                print_string("  DNS: record type=");
+//                char tbuf[10]; itoa(type, tbuf); print_string(tbuf);
+//                print_string(" rdlen=");
+//                char rbuf[10]; itoa(rdlength, rbuf); print_string(rbuf);
+//                print_string("\n");
                 
                 if (type == DNS_TYPE_A && rdlength == 4 && off + 4 <= (int)reply_len) {
                     uint32_t addr = 0;
@@ -212,9 +212,9 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
                     addr |= (uint32_t)reply[off + 2] << 8;
                     addr |= (uint32_t)reply[off + 3];
                     *ip_addr = htonl(addr);
-                    print_string("  DNS: Resolved to ");
-                    itoa(ntohl(*ip_addr), buf); print_string(buf);
-                    print_string("\n");
+//                    print_string("  DNS: Resolved to ");
+//                    itoa(ntohl(*ip_addr), buf); print_string(buf);
+//                    print_string("\n");
                     return 0;
                 }
                 
@@ -222,7 +222,7 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
                 off += rdlength;
             }
 
-            print_string("  DNS: No A record found\n");
+//            print_string("  DNS: No A record found\n");
             return -1;
         }
 
@@ -237,16 +237,18 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
         }
     }
 
-    print_string("  DNS: Timeout\n");
+//    print_string("  DNS: Timeout\n");
 
     /* Hardcoded fallback for common domains */
     static const struct {
         const char* name;
         uint32_t    ip;
     } fallback[] = {
-        {"google.com",     htonl(0xD83AD6CE)},  /* 216.58.214.206 */
-        {"example.com",    htonl(0x5DB8D822)},  /* 93.184.216.34 */
-        {"github.com",     htonl(0xC01EFF71)},  /* 192.30.255.113 */
+        {"google.com",       htonl(0xD83AD6CE)},  /* 216.58.214.206 */
+        {"example.com",      htonl(0x5DB8D822)},  /* 93.184.216.34 */
+        {"github.com",       htonl(0xC01EFF71)},  /* 192.30.255.113 */
+        {"open-meteo.com",   htonl(0x681A0E6F)},  /* 104.26.14.111 */
+        {"api.open-meteo.com", htonl(0x681A0E6F)}, /* 104.26.14.111 */
         {0, 0}
     };
     for (int i = 0; fallback[i].name; i++) {
@@ -255,9 +257,9 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
         while (*a && *b && *a == *b) { a++; b++; }
         if (*a == 0 && *b == 0) {
             *ip_addr = fallback[i].ip;
-            print_string("  DNS: Using hardcoded IP for ");
-            print_string(hostname);
-            print_string("\n");
+//            print_string("  DNS: Using hardcoded IP for ");
+//            print_string(hostname);
+//            print_string("\n");
             return 0;
         }
     }

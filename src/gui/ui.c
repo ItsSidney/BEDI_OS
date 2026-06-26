@@ -1,87 +1,85 @@
+// ============================================================
+//  BEDI OS — Sound Settings UI
+// ============================================================
 #include "gui/ui.h"
 #include "drivers/video/gfx.h"
+#include "drivers/video/framebuffer.h"
 #include "drivers/input/mouse.h"
 #include "drivers/input/keyboard.h"
-#include "drivers/video/framebuffer.h"
+#include "gui/wm.h"
+#include "drivers/audio/audio.h"
 #include "gui/gui.h"
+#include <stddef.h>
 
-void ui_init_context(ui_context_t* ctx, int x, int y, int w, int h, const char* title, uint32_t accent, int is_square) {
-    ctx->x = x; ctx->y = y; ctx->w = w; ctx->h = h;
-    for (int i = 0; i < 63; i++) {
-        if (!title[i]) { ctx->title[i] = 0; break; }
-        ctx->title[i] = title[i];
-    }
-    ctx->title[63] = 0;
-    ctx->accent_color = accent;
-    ctx->is_square = is_square;
-    ctx->button_count = 0;
-    ctx->on_render = 0;
-    ctx->on_key = 0;
-    ctx->is_running = 1;
-}
+static int g_sound_win = -1;
 
-void ui_add_button(ui_context_t* ctx, int id, int x, int y, int w, int h, const char* label, uint32_t bg, uint32_t fg, ui_click_cb cb) {
-    if (ctx->button_count >= UI_MAX_BUTTONS) return;
-    ui_button_t* btn = &ctx->buttons[ctx->button_count++];
-    btn->id = id; btn->x = x; btn->y = y; btn->w = w; btn->h = h;
-    btn->bg_color = bg; btn->fg_color = fg; btn->on_click = cb;
-    btn->is_hovered = 0; btn->is_active = 1;
-    for (int i = 0; i < 31; i++) {
-        if (!label[i]) { btn->label[i] = 0; break; }
-        btn->label[i] = label[i];
-    }
-    btn->label[31] = 0;
-}
-
-void ui_set_button_active(ui_context_t* ctx, int id, int active) {
-    for (int i = 0; i < ctx->button_count; i++) {
-        if (ctx->buttons[i].id == id) { ctx->buttons[i].is_active = active; return; }
+static void sound_on_key(int id, char key) {
+    if (key == 27) {
+        g_sound_win = -1;
+        wm_close_window(id);
     }
 }
 
-static int ui_hit_test(int px, int py, int x, int y, int w, int h) {
-    return (px >= x && px <= x + w && py >= y && py <= y + h);
+static void sound_on_mute(int win_id, int btn_id) {
+    audio_set_mute(!audio_is_muted());
 }
 
-void ui_app_run(ui_context_t* ctx) {
-    static int last_mbtns = 0;
-    while (ctx->is_running) {
-        int mx = mouse_get_x(), my = mouse_get_y();
-        int mbtns = mouse_get_buttons();
-        int clicked = (mbtns & 1) && !(last_mbtns & 1);
-        char key = get_key();
+static void sound_vol_down(int win_id, int btn_id) {
+    audio_set_master_volume(audio_get_master_volume() - 10);
+}
 
-        if (clicked && ui_hit_test(mx, my, ctx->x + 14 - 6, ctx->y + 14 - 6, 12, 12)) {
-            ctx->is_running = 0;
-        }
+static void sound_vol_up(int win_id, int btn_id) {
+    audio_set_master_volume(audio_get_master_volume() + 10);
+}
 
-        for (int b = 0; b < ctx->button_count; b++) {
-            ui_button_t* btn = &ctx->buttons[b];
-            if (!btn->is_active) { btn->is_hovered = 0; continue; }
-            int abs_x = ctx->x + btn->x;
-            int abs_y = ctx->y + 28 + btn->y;
-            btn->is_hovered = ui_hit_test(mx, my, abs_x, abs_y, btn->w, btn->h);
-            if (clicked && btn->is_hovered && btn->on_click) {
-                btn->on_click(btn->id);
-            }
-        }
+static void sound_render(int id, int x, int y, int w, int h, int vx, int vy) {
+    personalization_t* p = get_personalization();
+    uint32_t bg       = (p->theme == 0) ? 0x15171D : 0xF4F6F8;
+    uint32_t text_clr = (p->theme == 0) ? 0xE4E6EA : 0x202124;
+    uint32_t muted    = (p->theme == 0) ? 0x6D7079 : 0x9CA3AF;
+    uint32_t accent   = get_accent_color();
+    int vol = audio_get_master_volume();
 
-        if (key && ctx->on_key) ctx->on_key(key);
-        if (key == KEY_ESC) ctx->is_running = 0;
+    gfx_fill_rect(x, y, w, h, bg);
+    gfx_draw_string_transparent(x + 20, y + 20 - vy, "SOUND SETTINGS", accent);
 
-        draw_premium_wallpaper();
-        gfx_draw_window_custom(ctx->x, ctx->y, ctx->w, ctx->h, ctx->title, ctx->accent_color, ctx->is_square);
-        if (ctx->on_render) ctx->on_render(ctx->x, ctx->y + 28, ctx->w, ctx->h - 28);
-        for (int b = 0; b < ctx->button_count; b++) {
-            ui_button_t* btn = &ctx->buttons[b];
-            if (!btn->is_active) continue;
-            if (btn->bg_color == 0 && btn->label[0] == 0) continue;
-            gfx_draw_button(ctx->x + btn->x, ctx->y + 28 + btn->y, btn->w, btn->h, btn->label, btn->bg_color, btn->fg_color, btn->is_hovered);
-        }
-        draw_taskbar();
-        mouse_draw_cursor();
-        swap_buffers();
-        last_mbtns = mbtns;
-        for (volatile int i=0; i<30000; i++);
+    char buf[16];
+    int n = 0;
+    if (vol >= 100) buf[n++] = '0' + (vol / 100); vol %= 100;
+    if (n || vol >= 10) buf[n++] = '0' + (vol / 10); vol %= 10;
+    buf[n++] = '0' + vol;
+    buf[n++] = 0;
+
+    int label_y = y + 70 - vy;
+    gfx_draw_string_transparent(x + (w - n * 8) / 2, label_y, buf, text_clr);
+    gfx_draw_string_transparent(x + 20, label_y + 14, audio_is_muted() ? "MUTED" : "ACTIVE", muted);
+
+    int btn_y = label_y + 38;
+    gfx_fill_rect(x + 20, btn_y, 80, 28, muted);
+    gfx_draw_string_transparent(x + 32, btn_y + 8, "VOL -", 0x000000);
+    gfx_fill_rect(x + 120, btn_y, 80, 28, muted);
+    gfx_draw_string_transparent(x + 132, btn_y + 8, "VOL +", 0x000000);
+    gfx_fill_rect(x + 220, btn_y, 100, 28, audio_is_muted() ? accent : muted);
+    gfx_draw_string_transparent(x + 232, btn_y + 8, audio_is_muted() ? "UNMUTE" : "MUTE",
+                               audio_is_muted() ? 0x000000 : 0xFFFFFF);
+}
+
+void show_sound_settings(void) {
+    if (g_sound_win >= 0) {
+        wm_close_window(g_sound_win);
+        g_sound_win = -1;
+        return;
     }
+
+    uint32_t fw = get_fb_width(), fh = get_fb_height();
+    int w = 340, h = 180;
+    int x = (fw - w) / 2;
+    int y = (fh - h) / 2;
+
+    g_sound_win = wm_open_window(x, y, w, h, "Sound Settings", get_accent_color(),
+                                 sound_render, sound_on_key, NULL);
+
+    wm_add_button(g_sound_win, 1, 20, 110, 80, 28, "VOL -", 0x6B7280, 0x000000, sound_vol_down);
+    wm_add_button(g_sound_win, 2, 120, 110, 80, 28, "VOL +", 0x6B7280, 0x000000, sound_vol_up);
+    wm_add_button(g_sound_win, 3, 220, 110, 100, 28, "MUTE", 0xEF4444, 0xFFFFFF, sound_on_mute);
 }

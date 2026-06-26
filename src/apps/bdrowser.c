@@ -7,10 +7,12 @@
 #include "drivers/video/gfx.h"
 #include "drivers/video/framebuffer.h"
 #include "gui/wm.h"
+#include "drivers/input/keyboard.h"
+#include "drivers/input/mouse.h"
 #include "kernel/net/socket.h"
 #include "kernel/net/in.h"
-#include "kernel/net/tls.h"
 #include "kernel/task/task.h"
+#include "libs/bmp.h"
 #include <string.h>
 
 /* ---- Constants ---- */
@@ -87,6 +89,7 @@ typedef struct {
     int   img_w, img_h; /* for <img> placeholder */
     int   in_pre;       /* preserve whitespace */
     int   indent;       /* nesting level for lists */
+    char  img_src[128]; /* raw src attribute */
 } dom_node_t;
 
 /* ---- Render box (after layout) ---- */
@@ -95,6 +98,32 @@ typedef struct {
     int node_idx;
     int is_link;
 } render_box_t;
+
+/* ---- Tab State ---- */
+#define BW_MAX_TABS 8
+typedef struct {
+    int used;
+    char url[URL_MAX];
+    int url_len;
+    int editing_url;
+    char page_title[128];
+    char status_text[128];
+    int loading;
+    int scroll_y;
+    int content_height;
+    int hovered_box;
+    dom_node_t nodes[MAX_NODES];
+    int node_count;
+    render_box_t boxes[MAX_NODES * 3];
+    int box_count;
+    int text_pool_used;
+    char text_pool[MAX_TEXT];
+} bw_tab_t;
+
+static bw_tab_t bw_tabs[BW_MAX_TABS];
+static int bw_active_tab = 0;
+static int bw_tab_count = 0;
+static int prev_mouse_buttons = 0;
 
 /* ---- State ---- */
 static int    bw_win_id = -1;
@@ -164,7 +193,6 @@ static void bw_strncpy(char* d, const char* s, int n) {
 static void parse_url(const char* url, char* host, int hmax, char* path, int pmax, int* port_out) {
     int i = 0, default_port = 80;
     if (bw_strncmp(url, "http://", 7) == 0) i = 7;
-    else if (bw_strncmp(url, "https://", 8) == 0) { i = 8; default_port = 443; }
     int hi = 0;
     while (url[i] && url[i] != '/' && url[i] != ':' && hi < hmax - 1)
         host[hi++] = url[i++];
@@ -187,8 +215,9 @@ static void parse_url(const char* url, char* host, int hmax, char* path, int pma
 /* ============================================================ */
 
 static int skip_headers(char* buf, int len) {
-    for (int i = 0; i < len - 3; i++) {
-        if (buf[i]=='\r' && buf[i+1]=='\n' && buf[i+2]=='\r' && buf[i+3]=='\n') return i+4;
+    for (int i = 0; i < len - 1; i++) {
+        /* Accept both CRLF-CRLF and LF-LF as header terminators */
+        if (buf[i]=='\r' && buf[i+1]=='\n' && i+3 < len && buf[i+2]=='\r' && buf[i+3]=='\n') return i+4;
         if (buf[i]=='\n' && buf[i+1]=='\n') return i+2;
     }
     return -1;
@@ -200,22 +229,108 @@ static int is_chunked(char* buf, int headers_end) {
     return 0;
 }
 
-static int dechunk(char* buf, int len) {
-    int src = 0, dst = 0;
-    while (src < len) {
-        int chunk_size = 0;
-        while (src < len && ((buf[src]>='0'&&buf[src]<='9')||(buf[src]>='a'&&buf[src]<='f')||(buf[src]>='A'&&buf[src]<='F'))) {
-            int nib = buf[src]>='a'?buf[src]-'a'+10:buf[src]>='A'?buf[src]-'A'+10:buf[src]-'0';
-            chunk_size = chunk_size * 16 + nib; src++;
+static int is_gzipped(char* buf, int headers_end) {
+    for (int i = 0; i < headers_end - 5; i++)
+        if (bw_strncmpi(buf+i, "gzip", 4) == 0) return 1;
+    return 0;
+}
+
+/* Remove echoed HTTP request that appears embedded in the response.
+ * The echoed request starts with "GET /" (or similar) inside the header section,
+ * ending with \r\n\r\n. We replace it with just \r\n\r\n to restore the
+ * correct header/body boundary. Also normalizes line endings. */
+static int remove_echoed_request(char* buf, int len) {
+    if (len < 10) return len;
+    
+    /* Normalize line endings first - convert \n\n to \r\n\r\n for consistent parsing */
+    char temp[RAW_MAX];
+    int tlen = 0;
+    for (int i = 0; i < len && tlen < RAW_MAX - 2; i++) {
+        if (buf[i] == '\n') {
+            if (tlen > 0 && temp[tlen-1] != '\r') temp[tlen++] = '\r';
+            temp[tlen++] = buf[i];
+        } else {
+            temp[tlen++] = buf[i];
         }
-        while (src < len && buf[src] != '\n') src++; src++;
-        if (chunk_size == 0) break;
-        if (src + chunk_size > len) chunk_size = len - src;
-        for (int i = 0; i < chunk_size; i++) buf[dst++] = buf[src++];
-        if (src < len && buf[src] == '\r') src++;
-        if (src < len && buf[src] == '\n') src++;
     }
-    buf[dst] = 0; return dst;
+    
+    /* Now find the first header end (double CRLF) */
+    int first_hdr_end = -1;
+    for (int i = 0; i < tlen - 3; i++) {
+        if (temp[i]=='\r' && temp[i+1]=='\n' && temp[i+2]=='\r' && temp[i+3]=='\n') {
+            first_hdr_end = i + 4;
+            break;
+        }
+    }
+    if (first_hdr_end < 6) {
+        /* No proper header end found, copy back and return original length */
+        for (int i = 0; i < len && i < tlen; i++) buf[i] = temp[i];
+        return len;
+    }
+    
+    /* Check if there's an echoed request (looks like "GET /..." or "POST /...") before the first header end
+     * This happens when the server echoes back the request as body */
+    int echo_start = -1;
+    for (int i = 0; i < first_hdr_end - 4; i++) {
+        /* Detect "GET /", "POST /", "HEAD /" (echoed request line) */
+        if ((temp[i]=='G' && temp[i+1]=='E' && temp[i+2]=='T' && temp[i+3]==' ' && temp[i+4]=='/') ||
+            (temp[i]=='P' && temp[i+1]=='O' && temp[i+2]=='S' && temp[i+3]=='T' && temp[i+4]==' ' && temp[i+5]=='/') ||
+            (temp[i]=='H' && temp[i+1]=='E' && temp[i+2]=='A' && temp[i+3]=='D' && temp[i+4]==' ' && temp[i+5]=='/')) {
+            echo_start = i;
+            break;
+        }
+    }
+    
+    /* If we found an echoed request, we need to check if the "header" part 
+     * before it is actually valid or just garbage. If echo_start > 4, then
+     * we have a valid response header and body. If echo_start < 4, the response
+     * is corrupted/empty. We keep the response as-is in most cases. */
+    
+    /* Normalize: ensure our working buffer has the normalized content */
+    for (int i = 0; i < tlen && i < RAW_MAX; i++) buf[i] = temp[i];
+    buf[tlen] = 0;
+    return tlen;
+}
+
+static int dechunk(char* buf, int len) {
+    if (len <= 0) return 0;
+    
+    char temp[RAW_MAX];
+    int src = 0, dst = 0, tsrc = 0;
+    
+    while (tsrc < len) {
+        /* Skip leading CRLF before chunk-size */
+        while (tsrc < len && (buf[tsrc] == '\r' || buf[tsrc] == '\n')) tsrc++;
+        if (tsrc >= len) break;
+
+        int chunk_size = 0;
+        int has_hex = 0;
+        while (tsrc < len && ((buf[tsrc]>='0'&&buf[tsrc]<='9')||(buf[tsrc]>='a'&&buf[tsrc]<='f')||(buf[tsrc]>='A'&&buf[tsrc]<='F'))) {
+            has_hex = 1;
+            int nib = buf[tsrc]>='a'?buf[tsrc]-'a'+10:(buf[tsrc]>='A'?buf[tsrc]-'A'+10:buf[tsrc]-'0');
+            chunk_size = chunk_size * 16 + nib; tsrc++;
+        }
+        /* Skip to end of chunk-size line */
+        while (tsrc < len && buf[tsrc] != '\n') tsrc++;
+        if (tsrc < len) tsrc++; /* skip \n */
+        
+        if (!has_hex || chunk_size == 0) break;
+        if (tsrc + chunk_size > len) chunk_size = len - tsrc;
+        
+        /* Copy chunk data */
+        for (int i = 0; i < chunk_size && dst < RAW_MAX - 1; i++) {
+            temp[dst++] = buf[tsrc + i];
+        }
+        tsrc += chunk_size;
+        /* Skip trailing CRLF after chunk data */
+        if (tsrc < len && buf[tsrc] == '\r') tsrc++;
+        if (tsrc < len && buf[tsrc] == '\n') tsrc++;
+    }
+    
+    /* Copy dechunked content back to original buffer */
+    for (int i = 0; i < dst && i < len; i++) buf[i] = temp[i];
+    buf[dst] = 0;
+    return dst;
 }
 
 /* ============================================================ */
@@ -242,6 +357,7 @@ static dom_node_t* new_node(int type) {
     n->img_w = 120; n->img_h = 80;
     n->in_pre = 0;
     n->indent = 0;
+    n->img_src[0] = 0;
     return n;
 }
 
@@ -412,6 +528,7 @@ void html_to_dom(const char* html, int len) {
                     dom_node_t* n = new_node(NODE_IMG);
                     if (n) {
                         get_attr(html + tag_start, tag_len, "alt", n->alt, 64);
+                        get_attr(html + tag_start, tag_len, "src", n->img_src, 128);
                         char ws[16], hs[16];
                         get_attr(html + tag_start, tag_len, "width", ws, 16);
                         get_attr(html + tag_start, tag_len, "height", hs, 16);
@@ -680,6 +797,110 @@ static int bw_fetch_id = 0;
 
 static void bw_set_status(const char* s) { bw_strncpy(status_text, s, sizeof(status_text)); }
 
+/* ---- Image loading cache ---- */
+#define MAX_LOADED_IMAGES 4
+typedef struct {
+    int loaded;
+    char src[128];
+    bmp_image_t img;
+} loaded_image_t;
+static loaded_image_t loaded_images[MAX_LOADED_IMAGES];
+static int loaded_image_count = 0;
+
+static int bw_loaded_image_index(const char* src) {
+    for (int i = 0; i < loaded_image_count; i++)
+        if (bw_strncmp(loaded_images[i].src, src, 127) == 0)
+            return i;
+    return -1;
+}
+
+static int bw_load_image(const char* src_url) {
+    if (!src_url || !src_url[0]) return -1;
+    if (bw_strncmp(src_url, "http://", 7) != 0)
+        return -1;
+    if (loaded_image_count >= MAX_LOADED_IMAGES) return -1;
+
+    char host[128], path[256];
+    int port = 80;
+    parse_url(src_url, host, sizeof(host), path, sizeof(path), &port);
+    path[127] = 0;
+
+    uint32_t ip;
+    extern int dns_resolve(const char* hostname, uint32_t* ip_addr);
+    if (host[0] && dns_resolve(host, &ip) < 0) return -2;
+
+    int sock = sys_socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return -2;
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    memcpy(&addr.sin_addr.s_addr, &ip, 4);
+
+    if (sys_connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        sys_socket_close(sock);
+        return -2;
+    }
+
+    char req[256];
+    int ri = 0;
+    {
+        const char* g = "GET ";
+        const char* p = path;
+        while (*g) req[ri++] = *g++;
+        while (*p) req[ri++] = *p++;
+        const char* e = " HTTP/1.0\r\nHost: ";
+        while (*e) req[ri++] = *e++;
+        const char* h = host;
+        while (*h) req[ri++] = *h++;
+        const char* end = "\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n";
+        while (*end) req[ri++] = *end++;
+    }
+    req[ri] = 0;
+
+    int sent = sys_send(sock, req, ri, 0);
+    if (sent != ri) {
+        sys_socket_close(sock);
+        return -4;
+    }
+
+    char img_buf[4096];
+    int ilen = 0;
+    int wait = 0;
+    while (ilen < 4095) {
+        int n = sys_recv(sock, img_buf + ilen, 4095 - ilen, 0);
+        if (n <= 0) { wait++; if (wait > 40) break; continue; }
+        ilen += n;
+        wait = 0;
+    }
+    img_buf[ilen] = 0;
+
+    sys_socket_close(sock);
+
+    char* body = img_buf;
+    for (int i = 0; i < ilen - 3; i++) {
+        if (img_buf[i] == '\r' && img_buf[i+1] == '\n' && img_buf[i+2] == '\r' && img_buf[i+3] == '\n') {
+            body = img_buf + i + 4;
+            break;
+        }
+    }
+    int blen = ilen - (int)(body - img_buf);
+    if (blen <= 0) return -5;
+
+    loaded_image_t* li = &loaded_images[loaded_image_count++];
+    bw_strcpy(li->src, src_url);
+    memset(&li->img, 0, sizeof(bmp_image_t));
+    if (bmp_decode((uint8_t*)body, blen, &li->img) == 0 && li->img.pixels)
+        li->loaded = 1;
+    else
+        li->loaded = 0;
+    return 0;
+}
+
+static void bw_save_active_tab(void);
+static void bw_load_tab(int idx);
+
 static void bw_fetch_internal(const char* url) {
     int my_id = bw_fetch_id;
     char host[128], path[256];
@@ -705,13 +926,6 @@ static void bw_fetch_internal(const char* url) {
         if(my_id == bw_fetch_id) { bw_set_status("Connection failed"); loading = 0; } sys_socket_close(sock); return;
     }
 
-    tls_ctx_t* tls = NULL;
-    if (port == 443) {
-        bw_set_status("TLS handshake...");
-        tls = tls_connect(sock, host);
-        if (!tls) { if(my_id == bw_fetch_id) { bw_set_status("TLS failed"); loading = 0; } sys_socket_close(sock); return; }
-    }
-
     bw_set_status("Fetching...");
 
     /* Build HTTP request */
@@ -719,14 +933,13 @@ static void bw_fetch_internal(const char* url) {
     int ri = 0;
     #define R(s) do { const char* _s = s; while (*_s) req[ri++] = *_s++; } while(0)
     R("GET "); for (int pi=0; path[pi] && ri<700; pi++) req[ri++] = path[pi];
-    R(" HTTP/1.1\r\nHost: ");
+    R(" HTTP/1.0\r\nHost: ");
     for (int hi=0; host[hi] && ri<740; hi++) req[ri++] = host[hi];
-    R("\r\nUser-Agent: Bdrowser/2.0\r\nAccept: text/html,text/plain\r\nConnection: close\r\n\r\n");
+    R("\r\nUser-Agent: Bdrowser/2.0\r\nAccept: text/html,text/plain\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n");
     req[ri] = 0;
     #undef R
 
-    if (tls) tls_send(tls, req, ri);
-    else sys_send(sock, req, ri, 0);
+    sys_send(sock, req, ri, 0);
 
     /* Receive */
     raw_len = 0;
@@ -734,8 +947,7 @@ static void bw_fetch_internal(const char* url) {
     extern int sys_socket_closed(int s);
     while (no_data < 5 && raw_len < RAW_MAX - 1) {
         int n;
-        if (tls) n = tls_recv(tls, raw_buf + raw_len, RAW_MAX - 1 - raw_len);
-        else     n = sys_recv(sock, raw_buf + raw_len, RAW_MAX - 1 - raw_len, 0);
+        n = sys_recv(sock, raw_buf + raw_len, RAW_MAX - 1 - raw_len, 0);
         if (n <= 0) {
             if (sys_socket_closed(sock)) break;
             no_data++;
@@ -743,32 +955,91 @@ static void bw_fetch_internal(const char* url) {
     }
     raw_buf[raw_len] = 0;
 
-    if (tls) tls_close(tls);
+    /* Workaround: remove echoed HTTP request from response if present */
+    raw_len = remove_echoed_request(raw_buf, raw_len);
+
     sys_socket_close(sock);
 
     if (my_id != bw_fetch_id) return;
 
+    /* DEBUG: dump raw response */
+    extern void serial_puts(const char* s);
+    extern void itoa(uint64_t n, char* s);
+    serial_puts("[BROWSER] raw_len=");
+    char dbg_n[16]; itoa(raw_len, dbg_n); serial_puts(dbg_n);
+    serial_puts("\n[BROWSER] RAW:");
+    int dbg_max = raw_len < 1024 ? raw_len : 1024;
+    for (int dbg_i = 0; dbg_i < dbg_max; dbg_i++) {
+        if (raw_buf[dbg_i] >= 32 && raw_buf[dbg_i] < 127) {
+            char dbg_c[2] = {raw_buf[dbg_i], 0};
+            serial_puts(dbg_c);
+        } else {
+            serial_puts(".");
+        }
+    }
+    serial_puts("\n[BROWSER] ENDRAW\n");
+
     /* Decode */
     int hdr_end = skip_headers(raw_buf, raw_len);
-    if (hdr_end < 0) hdr_end = 0;
+    if (hdr_end < 0) {
+        bw_set_status("Error: no HTTP headers found");
+        loading = 0;
+        bw_save_active_tab();
+        return;
+    }
+
+    if (is_gzipped(raw_buf, hdr_end)) {
+        bw_set_status("Error: gzipped content not supported");
+        loading = 0;
+        bw_save_active_tab();
+        return;
+    }
 
     if (is_chunked(raw_buf, hdr_end) && hdr_end > 0) {
         int body_len = raw_len - hdr_end;
-        int new_len = dechunk(raw_buf + hdr_end, body_len);
-        raw_len = hdr_end + new_len;
+        char dechunk_buf[RAW_MAX];
+        memcpy(dechunk_buf, raw_buf + hdr_end, body_len);
+        dechunk_buf[body_len] = 0;
+        int new_len = dechunk(dechunk_buf, body_len);
+        if (new_len > 0) {
+            memcpy(raw_buf + hdr_end, dechunk_buf, new_len);
+            raw_len = hdr_end + new_len;
+            bw_set_status("Dechunked");
+        } else {
+            bw_set_status("Error: dechunk failed");
+            loading = 0;
+            bw_save_active_tab();
+            return;
+        }
     }
 
     /* Parse HTML into DOM */
     html_to_dom(raw_buf + hdr_end, raw_len - hdr_end);
+
+    if (node_count == 0) {
+        bw_set_status("Error: failed to parse HTML");
+        loading = 0;
+        bw_save_active_tab();
+        return;
+    }
 
     /* Layout */
     wm_window_t* win = wm_get_window(bw_win_id);
     int cw = win ? win->w : 800;
     do_layout(0, cw);
 
+    /* Load linked images (synchronous, within fetch task) */
+    for (int i = 0; i < node_count && loaded_image_count < MAX_LOADED_IMAGES; i++) {
+        if (nodes[i].type == NODE_IMG && nodes[i].img_src[0]) {
+            int idx = bw_loaded_image_index(nodes[i].img_src);
+            if (idx < 0) bw_load_image(nodes[i].img_src);
+        }
+    }
+
     scroll_y = 0;
     bw_set_status("Done");
     loading = 0;
+    bw_save_active_tab();
 }
 
 static void bw_fetch_task(void) {
@@ -779,7 +1050,10 @@ static void bw_fetch_task(void) {
 static void bw_on_click(int win_id, int btn_id) {
     (void)win_id;
     if (btn_id == 1) { /* + new tab */
-        bw_fetch_id++; /* abort any running fetch */
+        bw_save_active_tab();
+        if (bw_tab_count < BW_MAX_TABS) bw_tab_count++;
+        bw_active_tab = bw_tab_count - 1;
+        bw_tabs[bw_active_tab].used = 1;
         url_buf[0] = 0; url_len = 0;
         node_count = 0; box_count = 0;
         text_pool_used = 0;
@@ -809,6 +1083,14 @@ static void render_node_box(render_box_t* b, int ox, int oy) {
     }
 
     if (nd->type == NODE_IMG) {
+        if (nd->img_src[0]) {
+            int li_idx = bw_loaded_image_index(nd->img_src);
+            if (li_idx >= 0 && loaded_images[li_idx].loaded && loaded_images[li_idx].img.pixels) {
+                bmp_image_t* img = &loaded_images[li_idx].img;
+                gfx_draw_rgb_bitmap_scaled(b->x + ox, b->y + oy, b->w, b->h, img->pixels, img->width, img->height);
+                return;
+            }
+        }
         /* Placeholder: checkerboard + border + alt text */
         gfx_fill_rect(b->x + ox, b->y + oy, b->w, b->h, 0xE5E5EA);
         gfx_draw_rect_outline(b->x + ox, b->y + oy, b->w, b->h, 1, 0xC7C7CC);
@@ -907,19 +1189,93 @@ static void render_node_box(render_box_t* b, int ox, int oy) {
     }
 }
 
+static void bw_save_active_tab(void) {
+    bw_tab_t* t = &bw_tabs[bw_active_tab];
+    t->used = 1;
+    bw_strcpy(t->url, url_buf);
+    t->url_len = url_len;
+    t->editing_url = editing_url;
+    bw_strcpy(t->page_title, page_title);
+    bw_strcpy(t->status_text, status_text);
+    t->loading = loading;
+    t->scroll_y = scroll_y;
+    t->content_height = content_height;
+    t->hovered_box = hovered_box;
+    t->node_count = node_count;
+    t->box_count = box_count;
+    t->text_pool_used = text_pool_used;
+    memcpy(t->nodes, nodes, sizeof(nodes));
+    memcpy(t->boxes, boxes, sizeof(boxes));
+    memcpy(t->text_pool, text_pool, sizeof(text_pool));
+}
+
+static void bw_load_tab(int idx) {
+    bw_tab_t* t = &bw_tabs[idx];
+    bw_strcpy(url_buf, t->url);
+    url_len = t->url_len;
+    editing_url = t->editing_url;
+    bw_strcpy(page_title, t->page_title);
+    bw_strcpy(status_text, t->status_text);
+    loading = t->loading;
+    scroll_y = t->scroll_y;
+    content_height = t->content_height;
+    hovered_box = t->hovered_box;
+    node_count = t->node_count;
+    box_count = t->box_count;
+    text_pool_used = t->text_pool_used;
+    memcpy(nodes, t->nodes, sizeof(nodes));
+    memcpy(boxes, t->boxes, sizeof(boxes));
+    memcpy(text_pool, t->text_pool, sizeof(text_pool));
+}
+
 static void bw_on_render(int id, int x, int y, int w, int h, int vx, int vy) {
     (void)id; (void)vx; (void)vy;
+
+    /* Save current tab state before any switching */
+    bw_save_active_tab();
+
+    int mx = mouse_get_x();
+    int my = mouse_get_y();
+    int mbtn = mouse_get_buttons();
+    int clicked = (mbtn & 1) && !(prev_mouse_buttons & 1);
+    prev_mouse_buttons = mbtn;
+
+    /* Tab switching */
+    if (clicked) {
+        int tx = x + 8;
+        int ty = y + 4;
+        for (int i = 0; i < bw_tab_count; i++) {
+            int tw = 180;
+            int th = TABBAR_H - 4;
+            if (mx >= tx && mx <= tx + tw && my >= ty && my <= ty + th) {
+                if (i != bw_active_tab) {
+                    bw_active_tab = i;
+                    bw_load_tab(i);
+                }
+                break;
+            }
+            tx += tw + 4;
+            if (tx + 180 > x + w) break;
+        }
+    }
 
     /* === Tab Bar === */
     gfx_fill_rect(x, y, w, TABBAR_H, COL_TAB_IDLE);
     gfx_draw_hline(x, y + TABBAR_H, w, COL_BORDER);
-    /* Active tab */
-    int tab_w = 180;
-    gfx_fill_rect_rounded(x + 8, y + 4, tab_w, TABBAR_H - 4, 4, COL_TAB_ACTIVE);
-    /* Tab title */
-    char tab_title[40];
-    bw_strncpy(tab_title, page_title, 28);
-    gfx_draw_string_transparent(x + 14, y + 8, tab_title, 0xF2F2F7);
+    int tx = x + 8;
+    int ty = y + 4;
+    int tw = 180;
+    int th = TABBAR_H - 4;
+    for (int i = 0; i < bw_tab_count; i++) {
+        uint32_t tc = (i == bw_active_tab) ? COL_TAB_ACTIVE : COL_TAB_IDLE;
+        gfx_fill_rect_rounded(tx, ty, tw, th, 4, tc);
+        char tab_title[40];
+        bw_strncpy(tab_title, bw_tabs[i].page_title, 28);
+        uint32_t tt = (i == bw_active_tab) ? 0xF2F2F7 : 0x8E8E93;
+        gfx_draw_string_transparent(tx + 6, ty + 6, tab_title, tt);
+        tx += tw + 4;
+        if (tx + tw > x + w) break;
+    }
 
     /* === Nav Bar === */
     int nav_y = y + TABBAR_H;
@@ -935,12 +1291,6 @@ static void bw_on_render(int id, int x, int y, int w, int h, int vx, int vy) {
     uint32_t url_border = editing_url ? COL_URL_BORDER : COL_BORDER;
     gfx_fill_rect_rounded(url_x, btn_y, url_bar_w, 24, 12, COL_URL_BG);
     gfx_draw_rect_rounded_outline(url_x, btn_y, url_bar_w, 24, 12, 1, url_border);
-
-    /* Lock icon for https */
-    if (!editing_url && url_len > 0 && bw_strncmp(url_buf, "https://", 8) == 0) {
-        gfx_fill_rect_rounded(url_x + 8, btn_y + 6, 10, 12, 2, 0x34C759);
-        gfx_draw_string_transparent(url_x + 8, btn_y + 5, "s", 0x34C759);
-    }
 
     char url_display[URL_MAX];
     uint32_t url_fg = COL_URL_FG;
@@ -1125,4 +1475,15 @@ void bdrowser(void) {
     loading = 0; editing_url = 0;
     bw_strcpy(page_title, "New Tab");
     bw_set_status("Ready  —  Press / to enter URL");
+
+    bw_tab_count = 1;
+    bw_tabs[0].used = 1;
+    bw_strcpy(bw_tabs[0].url, url_buf);
+    bw_tabs[0].url_len = url_len;
+    bw_tabs[0].editing_url = editing_url;
+    bw_strcpy(bw_tabs[0].page_title, page_title);
+    bw_strcpy(bw_tabs[0].status_text, "Ready  —  Press / to enter URL");
+    bw_tabs[0].loading = loading;
+    bw_tabs[0].scroll_y = 0;
+    bw_tabs[0].content_height = 0;
 }

@@ -20,7 +20,7 @@ extern void isr20(); extern void isr21(); extern void isr22(); extern void isr23
 extern void isr24(); extern void isr25(); extern void isr26(); extern void isr27();
 extern void isr28(); extern void isr29(); extern void isr30(); extern void isr31();
 
-extern void serial_puts(const char* s);
+//extern void serial_puts(const char* s);
 extern void itoa(uint64_t n, char* s);
 
 void set_idt_entry(int num, uint64_t base, uint16_t sel, uint8_t flags) {
@@ -37,9 +37,8 @@ void core_exception_handler(uint64_t* registers) {
     uint64_t isr_num = registers[15];
     uint64_t err_code = registers[16];
     
-    serial_puts("\n[BEDI] CPU EXCEPTION: ");
-    char buf[16]; itoa(isr_num, buf); serial_puts(buf); serial_puts("\n");
-    
+//    serial_puts("\n[BEDI] CPU EXCEPTION: ");
+    char buf[16]; itoa(isr_num, buf);
     print_string("\n  !!! CPU CRITICAL FAULT: ");
     print_string(buf);
     print_string(" !!!\n");

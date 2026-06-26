@@ -5,6 +5,7 @@ static file_t files[MAX_FILES];
 static int current_dir = -1;
 static int home_dir_index = -1;
 static int trash_dir_index = -1;
+static int desktop_dir_index = -1;
 
 extern int strcmp(const char* s1, const char* s2);
 extern char* strcpy(char* dst, const char* src);
@@ -13,6 +14,7 @@ int get_user_dir() { return home_dir_index; }
 int fs_get_current_dir() { return current_dir; }
 int fs_get_home_dir() { return home_dir_index; }
 int fs_get_trash_dir() { return trash_dir_index; }
+int fs_get_desktop_dir() { return desktop_dir_index; }
 
 static int find_free_slot() {
     for (int i = 0; i < MAX_FILES; i++)
@@ -91,6 +93,8 @@ void init_filesystem() {
     int pics = ensure_dir_chain("home/user/Pictures");
     int trash_dir = ensure_dir_chain("home/user/Trash");
     trash_dir_index = trash_dir;
+    int desktop_dir = ensure_dir_chain("home/user/Desktop");
+    desktop_dir_index = desktop_dir;
 
     // Root level: critical system files
     int f;
@@ -185,15 +189,47 @@ void init_filesystem() {
         fs_close(f);
     }
 
-    // logo.bmp
+    // logo.bmp — 52×52 BEDI logo (blue circle on dark bg)
     f = fs_create("logo.bmp");
     if (f >= 0) {
-        static const unsigned char lbmp[] = {
-            0x42,0x4D,0xE6,0x1F,0x00,0x00,0x00,0x00,0x00,0x00,0x36,0x00,0x00,0x00,0x28,0x00,0x00,0x00,0x34,0x00,0x00,0x00,0x34,0x00,0x00,0x00,0x01,0x00,0x18,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
-        };
-        int lsz = sizeof(lbmp);
-        for (int i = 0; i < lsz && i < MAX_FILE_SIZE; i++) files[f].data[i] = lbmp[i];
-        files[f].size = lsz;
+        int bw = 52, bh = 52;
+        int row_size = ((bw * 24 + 31) / 32) * 4;
+        int total = 54 + bh * row_size;
+        if (total <= MAX_FILE_SIZE) {
+            uint8_t* lbmp = (uint8_t*)files[f].data;
+            lbmp[0] = 'B'; lbmp[1] = 'M';
+            lbmp[2] = total & 0xFF; lbmp[3] = (total>>8)&0xFF;
+            lbmp[4] = (total>>16)&0xFF; lbmp[5] = (total>>24)&0xFF;
+            lbmp[10] = 54; lbmp[11] = 0; lbmp[12] = 0; lbmp[13] = 0;
+            lbmp[14] = 40; lbmp[15] = 0; lbmp[16] = 0; lbmp[17] = 0;
+            lbmp[18] = bw & 0xFF; lbmp[19] = (bw>>8)&0xFF; lbmp[20] = 0; lbmp[21] = 0;
+            lbmp[22] = bh & 0xFF; lbmp[23] = (bh>>8)&0xFF; lbmp[24] = 0; lbmp[25] = 0;
+            lbmp[26] = 1; lbmp[27] = 0; lbmp[28] = 24; lbmp[29] = 0;
+            int bi = 54;
+            int cx = bw/2, cy = bh/2, r = 18;
+            for (int y = 0; y < bh; y++) {
+                for (int x = 0; x < bw; x++) {
+                    int dx = x - cx, dy = y - cy;
+                    int in_circle = dx*dx + dy*dy <= r*r;
+                    int in_ring = dx*dx + dy*dy <= r*r && dx*dx + dy*dy >= (r-4)*(r-4);
+                    // B letter shape
+                    int in_b = 0;
+                    if (x >= cx-5 && x <= cx+4 && y >= cy-7 && y <= cy+7) {
+                        if (y <= cy-3 || y >= cy+3) { if (x <= cx-2 || x >= cx+1) in_b = 1; }
+                        else { if (x <= cx+4) in_b = 1; }
+                    }
+                    int rv, gv, bv;
+                    if (in_ring) { rv = 0x58; gv = 0xA6; bv = 0xFF; }
+                    else if (in_circle) { rv = 0x1D; gv = 0x1F; bv = 0x26; }
+                    else if (in_b) { rv = 0x58; gv = 0xA6; bv = 0xFF; }
+                    else if ((x/4 + y/4) & 1) { rv = 0x12; gv = 0x15; bv = 0x1C; }
+                    else { rv = 0x0D; gv = 0x0E; bv = 0x12; }
+                    lbmp[bi++] = bv; lbmp[bi++] = gv; lbmp[bi++] = rv;
+                }
+                for (int p = bw*3; p < row_size; p++) lbmp[bi++] = 0;
+            }
+            files[f].size = total;
+        }
         fs_close(f);
     }
 }
@@ -499,6 +535,18 @@ int fs_copy_file(const char* src_name, const char* dst_name) {
     if (src < 0) return -1;
     if (find_in_dir(current_dir, dst_name) >= 0) return -1;
     int dst = create_entry(dst_name, files[src].type, current_dir, files[src].flags);
+    if (dst < 0) return -1;
+    files[dst].size = files[src].size;
+    for (int i = 0; i < files[src].size; i++) files[dst].data[i] = files[src].data[i];
+    files[dst].modified_time = 1;
+    return dst;
+}
+
+int fs_copy_file_to_dir(int src_dir, const char* src_name, int dst_dir, const char* dst_name) {
+    int src = find_in_dir(src_dir, src_name);
+    if (src < 0) return -1;
+    if (find_in_dir(dst_dir, dst_name) >= 0) return -1;
+    int dst = create_entry(dst_name, files[src].type, dst_dir, files[src].flags);
     if (dst < 0) return -1;
     files[dst].size = files[src].size;
     for (int i = 0; i < files[src].size; i++) files[dst].data[i] = files[src].data[i];

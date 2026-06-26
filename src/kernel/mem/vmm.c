@@ -16,13 +16,13 @@ static inline void invlpg(uint64_t addr) {
     __asm__ volatile("invlpg (%0)" : : "r"(addr) : "memory");
 }
 
-extern void serial_puts(const char* s);
+//extern void serial_puts(const char* s);
 
 void vmm_init(void) {
-    serial_puts("[VMM] Initializing...\n");
+//    serial_puts("[VMM] Initializing...\n");
     pmm_init();
     current_pml4 = (uint64_t*)(read_cr3() + hhdm_offset);
-    serial_puts("[VMM] Initialized\n");
+//    serial_puts("[VMM] Initialized\n");
 }
 
 static uint64_t* get_next_level(uint64_t* table, uint64_t index, bool allocate) {

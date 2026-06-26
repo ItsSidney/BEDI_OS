@@ -2,7 +2,7 @@
 
 extern tss_t tss;
 
-extern void serial_puts(const char*);
+//extern void serial_puts(const char*);
 
 #include <stdint.h>
 
@@ -100,15 +100,15 @@ void install_gdt(void) {
 
 // Called after tasking is initialized to set up TSS and per-CPU area
 void init_syscall_gs_base(void) {
-    serial_puts("[BEDI] init_syscall_gs_base: init_tss\n");
+//    serial_puts("[BEDI] init_syscall_gs_base: init_tss\n");
     // Initialize TSS
     init_tss();
-    serial_puts("[BEDI] init_syscall_gs_base: load_tss\n");
+//    serial_puts("[BEDI] init_syscall_gs_base: load_tss\n");
     // Load TSS via assembly function
     load_tss();
-    serial_puts("[BEDI] init_syscall_gs_base: wrmsr\n");
+//    serial_puts("[BEDI] init_syscall_gs_base: wrmsr\n");
     // Set up GS base for per-CPU area (for swapgs in syscall handler)
     // GS base is stored in IA32_GS_BASE MSR (0xC0000101)
     wrmsr(0xC0000101, (uint64_t)&cpu_data);
-    serial_puts("[BEDI] init_syscall_gs_base: done\n");
+//    serial_puts("[BEDI] init_syscall_gs_base: done\n");
 }

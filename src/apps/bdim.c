@@ -1,5 +1,7 @@
 #include "gui/wm.h"
+#include "gui/gui.h"
 #include "drivers/video/gfx.h"
+#include "drivers/input/mouse.h"
 #include "filesystem/filesystem.h"
 #include <stdint.h>
 #include <string.h>
@@ -20,6 +22,7 @@ static int cmd_len = 0;
 static char current_file[64];
 static int win_id = -1;
 static int modified = 0;
+static int prev_mbtn = 0;
 static int show_lines = 1;
 static int visual_anchor = 0;
 static int tab_w = 4;
@@ -32,16 +35,16 @@ typedef struct { TT type; int start; int len; } Tok;
 
 static uint32_t tok_color(TT t) {
     switch(t) {
-        case TT_KEYWORD: return 0xC586C0; // purple (if, else, while, for, return)
-        case TT_TYPE:    return 0x4EC9B0; // teal (int, double, bool, string, void)
-        case TT_FUNC:    return 0xDCDCAA; // yellow (print, input, exit, main)
-        case TT_NUM:     return 0xB5CEA8; // soft green (numbers)
-        case TT_STRING:  return 0xCE9178; // orange-warm (strings)
-        case TT_COMMENT: return 0x6A9955; // muted green (// and /* */)
-        case TT_CONST:   return 0x569CD6; // bright blue (true, false, endl)
-        case TT_OP:      return 0xD4D4D4; // light gray (operators)
-        case TT_BRACE:   return 0xFFD700; // gold (braces, parens, semicolon, comma)
-        default:         return 0xCCCCCC; // light gray (identifiers, other)
+        case TT_KEYWORD: return 0xF0F0F0; // bright white (if, else, while, for, return)
+        case TT_TYPE:    return 0xCCCCCC; // light gray (int, double, bool, string, void)
+        case TT_FUNC:    return 0xFFFFFF; // white (print, input, exit, main)
+        case TT_NUM:     return 0xAAAAAA; // gray (numbers)
+        case TT_STRING:  return 0xBBBBBB; // light gray (strings)
+        case TT_COMMENT: return 0x666666; // dark gray (// and /* */)
+        case TT_CONST:   return 0xCCCCCC; // light gray (true, false, endl)
+        case TT_OP:      return 0x888888; // dim gray (operators)
+        case TT_BRACE:   return 0x999999; // mid gray (braces, parens, semicolon, comma)
+        default:         return 0xAAAAAA; // gray (identifiers, other)
     }
 }
 
@@ -173,7 +176,7 @@ static void build_suggest(const char* pfx) {
             suggestions[sug_count][k]=0;
             k=0; while(bedic_keywords[i].desc[k]&&k<35) sug_desc[sug_count][k]=bedic_keywords[i].desc[k],k++;
             sug_desc[sug_count][k]=0;
-            uint32_t cols[]={0x4EC9B0,0xC586C0,0xDCDCAA,0x569CD6,0xCCCCCC};
+            uint32_t cols[]={0xCCCCCC,0xF0F0F0,0xFFFFFF,0xAAAAAA,0x888888};
             sug_col[sug_count]=cols[bedic_keywords[i].cat];
             sug_count++;
         }
@@ -189,7 +192,7 @@ static void build_suggest(const char* pfx) {
             suggestions[sug_count][k]=0;
             k=0; while(bedic_keywords[i].desc[k]&&k<35) sug_desc[sug_count][k]=bedic_keywords[i].desc[k],k++;
             sug_desc[sug_count][k]=0;
-            uint32_t cols[]={0x4EC9B0,0xC586C0,0xDCDCAA,0x569CD6,0xCCCCCC};
+            uint32_t cols[]={0xCCCCCC,0xF0F0F0,0xFFFFFF,0xAAAAAA,0x888888};
             sug_col[sug_count]=cols[bedic_keywords[i].cat];
             sug_count++;
         }
@@ -547,15 +550,16 @@ static void on_render(int id, int x, int y, int w, int h, int vx, int vy) {
     Tok toks[MAX_TOKENS];
 
     // ── Title bar ──
-    gfx_fill_rect(x,y,w,20,0x2D2D2D);
-    gfx_fill_rect(x,y+19,w,1,0x569CD6);
+    uint32_t accent_bar = 0x666666;
+    gfx_fill_rect(x,y,w,22,0x252526);
+    gfx_fill_rect(x,y+21,w,2,accent_bar);
     char title[48]; int ti=0;
     const char* fn=current_file[0]?current_file:"untitled.bc";
-    for(int i=0;fn[i]&&ti<36;i++) title[ti++]=fn[i];
-    if(modified&&ti<35){title[ti++]=' ';title[ti++]='*';}
+    for(int i=0;fn[i]&&ti<38;i++) title[ti++]=fn[i];
+    if(modified&&ti<37){title[ti++]=' ';title[ti++]='*';}
     title[ti]=0;
-    gfx_fill_rect(x+6,y+4,8,10,is_bc?0x569CD6:0x636366);
-    gfx_draw_string_transparent(x+20,y+3,title,0xCCCCCC);
+    gfx_fill_rect_rounded(x+6,y+4,14,14,3,accent_bar);
+    gfx_draw_string_transparent(x+26,y+4,title,0xE0E0E0);
 
     // ── Background passes: gutter fills, line highlight ──
     for(int r=0;r<vis;r++){
@@ -676,39 +680,100 @@ static void on_render(int id, int x, int y, int w, int h, int vx, int vy) {
     }
 
     // ── Status bar ──
-    gfx_fill_rect(x,y+h-20,w,20,0x007ACC);
-    uint32_t mode_col=0; const char* mode_lbl="";
-    if(mode==0){mode_col=0x4EC9B0;mode_lbl="NORMAL";}
-    else if(mode==1){mode_col=0x569CD6;mode_lbl="INSERT";}
-    else if(mode==2){mode_col=0xC586C0;mode_lbl="CMD";}
-    else if(mode==3){mode_col=0xDCDCAA;mode_lbl="VISUAL";}
-    gfx_fill_rect(x+2,y+h-18,46,16,mode_col);
-    gfx_draw_string_transparent(x+6,y+h-18,mode_lbl,mode_col==0xDCDCAA?0x1E1E1E:0xFFFFFF);
+    int sb_h = 24;
+    int sb_y = y + h - sb_h;
+    gfx_fill_rect(x, sb_y, w, sb_h, 0x1E1E1E);
+    gfx_draw_hline(x, sb_y, w, 0x333333);
 
-    // Command text
+    uint32_t mode_col; const char* mode_lbl;
+    if(mode==0){mode_col=0x888888;mode_lbl="NORMAL";}
+    else if(mode==1){mode_col=0xAAAAAA;mode_lbl="INSERT";}
+    else if(mode==2){mode_col=0x666666;mode_lbl="CMD";}
+    else{mode_col=0x999999;mode_lbl="VISUAL";}
+    gfx_fill_rect(x+4, sb_y+4, 54, sb_h-8, mode_col);
+    gfx_draw_string_transparent(x+8, sb_y+5, mode_lbl, mode_col==0xDCDCAA?0x1E1E1E:0xFFFFFF);
+    gfx_draw_vline(x+62, sb_y+4, sb_h-8, 0x333333);
+
+    int si = x + 70;
+
     if(mode==2){
-        char cb[40]; int ci=0; cb[ci++]=':';
-        for(int i=0;cmd_buf[i]&&ci<38;i++) cb[ci++]=cmd_buf[i]; cb[ci]=0;
-        gfx_draw_string_transparent(x+52,y+h-18,cb,0xFFFFFF);
-    } else if(modified){
-        gfx_fill_rect(x+52,y+h-18,16,16,0xE06C75);
-        gfx_draw_string_transparent(x+56,y+h-18,"+",0x1E1E1E);
+        char cb[50]; int ci=0; cb[ci++]=':';
+        for(int i=0;cmd_buf[i]&&ci<48;i++) cb[ci++]=cmd_buf[i]; cb[ci]=0;
+        gfx_draw_string_transparent(si, sb_y+5, cb, 0xFFFFFF);
+    } else {
+        const char* fn2 = current_file[0] ? current_file : "untitled.bc";
+        gfx_draw_string_transparent(si, sb_y+5, fn2, 0x888888);
+        if(modified){
+            int fl = strlen(fn2);
+            gfx_draw_string_transparent(si+fl*8+4, sb_y+5, "*", 0xE06C75);
+        }
     }
 
-    // Right info
-    char info[40]; int ip=0;
-    int ln=cy+1;char lb[8];int li=0;
-    if(ln==0)lb[li++]='0';else{int t=ln;char tmp[8];int ti2=0;while(t){tmp[ti2++]='0'+(t%10);t/=10;}for(int j=ti2-1;j>=0;j--)lb[li++]=tmp[j];}
+    si = x + w - 10;
+    char info[48]; int ip=0;
+    int ln=cy+1; char lb[12]; int li=0;
+    {int t=ln;if(!t)lb[li++]='0';else{char tmp[10];int ti2=0;while(t){tmp[ti2++]='0'+(t%10);t/=10;}for(int j=ti2-1;j>=0;j--)lb[li++]=tmp[j];}}
     for(int j=0;j<li;j++)info[ip++]=lb[j];
     info[ip++]=':';
-    int cn=cx+1;li=0;
-    if(cn==0)lb[li++]='0';else{int t=cn;char tmp[8];int ti2=0;while(t){tmp[ti2++]='0'+(t%10);t/=10;}for(int j=ti2-1;j>=0;j--)lb[li++]=tmp[j];}
+    int cn=cx+1; li=0;
+    {int t=cn;if(!t)lb[li++]='0';else{char tmp[10];int ti2=0;while(t){tmp[ti2++]='0'+(t%10);t/=10;}for(int j=ti2-1;j>=0;j--)lb[li++]=tmp[j];}}
     for(int j=0;j<li;j++)info[ip++]=lb[j];
-    info[ip++]=' ';info[ip++]=' ';
+    info[ip++]=' ';
     const char* ft=is_bc?".bc":".txt";
-    for(int i=0;ft[i]&&ip<38;i++) info[ip++]=ft[i];
+    for(int i=0;ft[i]&&ip<46;i++) info[ip++]=ft[i];
     info[ip]=0;
-    gfx_draw_string_transparent(x+w-5-ip*8,y+h-18,info,0xFFFFFF);
+    gfx_draw_string_transparent(si-ip*8, sb_y+5, info, 0x888888);
+    gfx_draw_vline(si-ip*8-6, sb_y+4, sb_h-8, 0x333333);
+
+    // ── Mouse handling ──
+    int mbtn = mouse_get_buttons();
+    int mx = mouse_get_x(), my = mouse_get_y();
+    int left_clk = (mbtn & MOUSE_LEFT) && !(prev_mbtn & MOUSE_LEFT);
+    prev_mbtn = mbtn;
+
+    if(sug_active && left_clk){
+        int dx=x+gutter+5+sug_cx*8;
+        int dy=y+24+(sug_cy-scroll_y)*16+18;
+        int dw=172, dh=sug_count*16+4;
+        if(dy+sug_count*16>y+h-42) dy=y+24+(sug_cy-scroll_y)*16-sug_count*16-2;
+        int max_w=160;
+        for(int i=0;i<sug_count;i++){
+            int wlen=strlen(suggestions[i]), dlen=strlen(sug_desc[i]);
+            int total=16+wlen*8+dlen*8;
+            if(total>max_w) max_w=total;
+        }
+        dw=max_w+12; dh=sug_count*16+4;
+        if(dx+dw>x+w-5) dx=x+w-5-dw;
+        if(dx<x+5) dx=x+5; if(dw>w-10) dw=w-10;
+        if(mx>=dx && mx<dx+dw && my>=dy && my<dy+dh){
+            int rel = (my-(dy+18))/16;
+            if(rel>=0 && rel<sug_count){ sug_sel=rel; accept_sug(); }
+            return;
+        }
+    }
+
+    if(left_clk && cy>=scroll_y && cy<scroll_y+vis && my>=y+24 && my<y+24+vis*16 && mx>=x+gutter && mx<x+w-8){
+        int ry = my - (y+24);
+        int row = scroll_y + ry/16;
+        int col = (mx - (x+gutter+5))/8;
+        if(row>=0 && row<bdim_lines){
+            cy = row;
+            int len=0; while(bdim_buf[cy][len]) len++;
+            if(col>len) col=len;
+            if(col<0) col=0;
+            cx = col;
+            sug_active=0;
+        }
+    }
+
+    if(left_clk && mx>=x+w-8 && mx<x+w-2 && bdim_lines>vis){
+        int sb_y2 = y+24;
+        int sb_h2 = h-42;
+        int rel_y = my - sb_y2;
+        scroll_y = rel_y*(bdim_lines-vis)/sb_h2;
+        if(scroll_y<0) scroll_y=0;
+        if(scroll_y>bdim_lines-vis) scroll_y=bdim_lines-vis;
+    }
 }
 
 static void on_resize(int wid, int w, int h) { (void)wid; (void)w; (void)h; }
@@ -716,6 +781,6 @@ static void on_resize(int wid, int w, int h) { (void)wid; (void)w; (void)h; }
 void bdim_app(const char* filename) {
     if(win_id>=0){wm_window_t* w=wm_get_window(win_id);if(w){wm_bring_to_front(win_id);return;}}
     load(filename);
-    mode=0; sug_active=0; modified=0; show_lines=1;
-    win_id=wm_open_window(40,40,900,650,"bdim - BEDIC Editor",0x007ACC,on_render,on_key,on_resize);
+    mode=0; sug_active=0; modified=0; show_lines=1; prev_mbtn=0;
+    win_id=wm_open_window(40,40,900,650,"bdim - BEDIC Editor",0x555555,on_render,on_key,on_resize);
 }

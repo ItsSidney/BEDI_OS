@@ -111,9 +111,9 @@ void draw_early_progress(int step, uint32_t color) {
     }
     if (tag && msg) {
         extern void boot_log_add(const char*, const char*, uint32_t, uint32_t);
-        extern void draw_boot_log(void);
+        extern void draw_splash_screen(int);
         boot_log_add(tag, msg, tag_color, 0xE8EAED);
-        draw_boot_log();
+        draw_splash_screen(step);
     }
 }
 
@@ -192,14 +192,19 @@ void background_worker(void) {
     }
 }
 
+#include "kernel/net/socket.h"
+extern void itoa(uint64_t n, char* s);
+extern void exit_task(int code);
+#include <string.h>
+
 extern void init_fpu();
 
 void _start_c(void) {
     serial_init();
-    serial_puts("[BEDI] _start_c starting\n");
+//    serial_puts("[BEDI] _start_c starting\n");
 
     if (framebuffer_request.response != 0 && framebuffer_request.response->framebuffer_count >= 1) {
-        serial_puts("[BEDI] Initializing framebuffer\n");
+//        serial_puts("[BEDI] Initializing framebuffer\n");
         struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
         init_framebuffer(
             (uint32_t*)fb->address,
@@ -211,12 +216,12 @@ void _start_c(void) {
             fb->green_mask_shift,
             fb->blue_mask_shift
         );
-        serial_puts("[BEDI] Framebuffer initialized\n");
+//        serial_puts("[BEDI] Framebuffer initialized\n");
     }
 
-    serial_puts("[BEDI] Calling draw_early_progress\n");
+//    serial_puts("[BEDI] Calling draw_early_progress\n");
     draw_early_progress(1, 0x00FF00); // 1: Serial
-    serial_puts("[BEDI] draw_early_progress returned\n");
+//    serial_puts("[BEDI] draw_early_progress returned\n");
 
     init_idt();
     draw_early_progress(2, 0x00FF00); // 2: IDT
@@ -225,7 +230,7 @@ void _start_c(void) {
     draw_early_progress(3, 0x00FF00); // 3: FPU
 
     if (limine_base_revision[2] != 0) {
-        serial_puts("[BEDI] FATAL: base revision\n");
+//        serial_puts("[BEDI] FATAL: base revision\n");
         draw_early_progress(1, 0xFF0000); 
         hcf();
     }
@@ -242,7 +247,7 @@ void _start_c(void) {
     draw_early_progress(5, 0x00FF00); // 5: Framebuffer
 
     if (hhdm_request.response == 0) {
-        serial_puts("[BEDI] FATAL: no HHDM\n");
+//        serial_puts("[BEDI] FATAL: no HHDM\n");
         draw_early_progress(3, 0xFF0000); 
         hcf();
     }
@@ -250,7 +255,7 @@ void _start_c(void) {
     draw_early_progress(6, 0x00FF00); // 6: HHDM
 
     if (memmap_request.response == 0) {
-        serial_puts("[BEDI] FATAL: no memmap\n");
+//        serial_puts("[BEDI] FATAL: no memmap\n");
         draw_early_progress(4, 0xFF0000); 
         hcf();
     }
@@ -261,7 +266,7 @@ void _start_c(void) {
 }
 
 void kmain() {
-    serial_puts("[BEDI] kmain starting\n");
+//    serial_puts("[BEDI] kmain starting\n");
     draw_early_progress(8, 0x00FF00); // 8: kmain
 
     kheap_init();
@@ -339,7 +344,7 @@ void kmain() {
     }
     create_task(background_worker, "Worker");
     
-    serial_puts("[BEDI] Starting GUI\n");
+//    serial_puts("[BEDI] Starting GUI\n");
     draw_early_progress(31, 0x00FF00); // GUI
     
     extern void set_splash_mode(bool mode);

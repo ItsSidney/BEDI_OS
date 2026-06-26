@@ -17,6 +17,9 @@ static int window_count = 0;
 static int focused_id = -1;
 static int next_win_id = 1;
 static int prev_mouse_btn = 0;
+static int current_desktop = 0;
+
+#define TOP_BAR_H 36
 
 static int point_in_rect(int px, int py, int rx, int ry, int rw, int rh) {
     return (px >= rx && px <= rx + rw && py >= ry && py <= ry + rh);
@@ -64,7 +67,10 @@ int wm_open_window(int x, int y, int w, int h, const char* title, uint32_t accen
 
     wm_window_t* win = &windows[slot];
     win->id = next_win_id++;
-    win->x = x; win->y = y; win->w = w; win->h = h;
+    win->x = x; if (win->x < 0) win->x = 0;
+    win->y = y; if (win->y < TOP_BAR_H) win->y = TOP_BAR_H;
+    win->w = w; win->h = h;
+    win->desktop = current_desktop;
     win->view_x = 0; win->view_y = 0;
     win->content_w = w; win->content_h = h - WM_TITLEBAR_H;
     int j = 0; while (title[j] && j < 63) { win->title[j] = title[j]; j++; } win->title[j] = 0;
@@ -123,7 +129,7 @@ void wm_set_button_active(int win_id, int btn_id, int active) {
 static void get_sorted_windows(wm_window_t** sorted, int* count) {
     *count = 0;
     for (int i = 0; i < WM_MAX_WINDOWS; i++) {
-        if (windows[i].id != -1 && (windows[i].flags & WM_FLAG_VISIBLE)) {
+        if (windows[i].id != -1 && (windows[i].flags & WM_FLAG_VISIBLE) && windows[i].desktop == current_desktop) {
             sorted[(*count)++] = &windows[i];
         }
     }
@@ -201,7 +207,7 @@ static void render_window(wm_window_t* win) {
         int bx = x + win->buttons[b].x;
         int by = y + WM_TITLEBAR_H + win->buttons[b].y;
         uint32_t btn_bg = win->buttons[b].is_hovered ? gfx_lighten(win->buttons[b].bg_color, 20) : win->buttons[b].bg_color;
-        gfx_fill_rect_rounded(bx, by, win->buttons[b].w, win->buttons[b].h, 4, btn_bg);
+        gfx_fill_rect(bx, by, win->buttons[b].w, win->buttons[b].h, btn_bg);
         gfx_draw_string_transparent(bx + (win->buttons[b].w - gfx_strlen(win->buttons[b].label) * 8) / 2,
                                     by + (win->buttons[b].h - 16) / 2, win->buttons[b].label, win->buttons[b].fg_color);
     }
@@ -249,7 +255,7 @@ int wm_tick(void) {
         if (win->flags & WM_FLAG_DRAGGING) {
             if (mbtn & 1) {
                 win->x = mx - win->drag_offset_x; win->y = my - win->drag_offset_y;
-                if (win->y < 0) win->y = 0;
+                if (win->y < TOP_BAR_H) win->y = TOP_BAR_H;
             } else win->flags &= ~WM_FLAG_DRAGGING;
         }
         if (win->flags & WM_FLAG_RESIZING) {
@@ -320,12 +326,13 @@ done:
         }
     }
 
-    extern void gui_toggle_start_menu(void), gui_open_search(void), gui_handle_menu_key(char), gui_handle_search_key(char);
-    extern int gui_is_menu_open(void), gui_is_search_open(void);
+    extern void gui_toggle_start_menu(void), gui_open_search(void), gui_handle_menu_key(char), gui_handle_search_key(char), gui_handle_topbar_cfg_key(char);
+    extern int gui_is_menu_open(void), gui_is_search_open(void), gui_is_topbar_cfg_open(void);
     if ((keyboard_is_key_down(0x5B) || keyboard_is_key_down(0x5C)) && (key == 's' || key == 'S')) { gui_open_search(); key = 0; }
     else if (key == 132) { gui_toggle_start_menu(); key = 0; }
     if (key != 0) {
-        if (gui_is_search_open()) { gui_handle_search_key(key); key = 0; }
+        if (gui_is_topbar_cfg_open()) { gui_handle_topbar_cfg_key(key); key = 0; }
+        else if (gui_is_search_open()) { gui_handle_search_key(key); key = 0; }
         else if (gui_is_menu_open()) { gui_handle_menu_key(key); key = 0; }
 
         if (focused_id >= 0) {
@@ -356,8 +363,8 @@ done:
 }
 
 void wm_run_single(int win_id) {
-    wm_window_t* win = find_window(win_id); if (!win) return;
-    while (win->flags & WM_FLAG_VISIBLE) { draw_premium_wallpaper(); wm_tick(); draw_taskbar(); mouse_draw_cursor(); swap_buffers(); sleep_ms(16); }
+    wm_window_t* win = find_window(win_id);
+    if (!win) return;
 }
 
 wm_window_t* wm_get_window_by_index(int index) {
@@ -371,3 +378,9 @@ wm_window_t* wm_get_window(int id) { return find_window(id); }
 int wm_get_window_count(void) { return window_count; }
 void wm_set_app_data(int win_id, void* data) { wm_window_t* win = find_window(win_id); if (win) win->app_data = data; }
 void* wm_get_app_data(int win_id) { wm_window_t* win = find_window(win_id); return win ? win->app_data : 0; }
+
+int wm_get_current_desktop(void) { return current_desktop; }
+
+void wm_set_current_desktop(int d) {
+    if (d >= 0 && d <= 4) current_desktop = d;
+}

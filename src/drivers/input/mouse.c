@@ -193,7 +193,7 @@ void mouse_handler(void) {
             break;
 
         case 2:
-            // Third byte: Y movement — process complete packet
+            // Third byte: Y movement
             mouse_packet[2] = data;
             mouse_cycle = 0;
 
@@ -211,16 +211,6 @@ void mouse_handler(void) {
             int dy = (int)mouse_packet[2];
             if (mouse_packet[0] & 0x20) dy |= 0xFFFFFF00;  // Sign extend
 
-            // Apply acceleration curve
-            int abs_dx = dx < 0 ? -dx : dx;
-            int abs_dy = dy < 0 ? -dy : dy;
-            
-            if (abs_dx > 10) { dx = dx * 3; }
-            else if (abs_dx > 5) { dx = dx * 2; }
-            
-            if (abs_dy > 10) { dy = dy * 3; }
-            else if (abs_dy > 5) { dy = dy * 2; }
-            
             // Apply sensitivity multiplier
             if (mouse_sensitivity == 1) {
                 dx = dx / 2;
@@ -311,4 +301,11 @@ void mouse_draw_cursor(void) {
             }
         }
     }
+}
+
+int mouse_get_wheel_delta(void) {
+    return 0;
+}
+
+void mouse_clear_wheel_delta(void) {
 }
