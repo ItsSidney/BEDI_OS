@@ -23,7 +23,7 @@ static const char* commands[] = {
     "help", "about", "clear", "reboot", "shutdown", 
     "ls", "rm", "mkdir", "cd", "pwd", "cat", 
     "touch", "rmdir", "gui", "pcilist", "meminfo", 
-    "syscheck", "uptime", "hexdump", "gpu_3d", "gpu",
+    "syscheck", "uptime", "hexdump", "gpu_3d",
     "write", "append", "cp", "mv", "rename", "stat", "grep",
     "bdim", "colors", "bdfetch", "bcc", "brun", "vmtest", "ring3test", "ping", "dns", "bootlog", "bdrowser", 0
 };
@@ -232,7 +232,6 @@ void execute_command(char* input) {
         print_string("    syscheck         - Perform system integrity check\n");
         print_string("    pcilist          - List detected PCI devices\n");
         print_string("    gpu_3d           - Check GPU status and test 3D acceleration\n");
-        print_string("    gpu              - Show GPU status and capabilities\n");
         print_string("    gui              - Launch graphical user interface\n");
         print_string("    bdfetch          - Display system information (BEDI OS fetch)\n");
         print_string("    bcc              - Simple C Compiler\n");
@@ -450,7 +449,7 @@ void execute_command(char* input) {
         } else {
             print_string("  [WARN] GPU not detected or basic VGA only\n");
         }
-    } else if (strcmp(input, "gpu") == 0 || strcmp(input, "gpu_3d") == 0) {
+    } else if (strcmp(input, "gpu_3d") == 0) {
         gpu_device_t* gpu = gpu_get_primary();
         if (!gpu) {
             print_string("\n  No GPU detected or driver not initialized.\n");
