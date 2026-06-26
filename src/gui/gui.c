@@ -672,7 +672,7 @@ void gui_handle_menu_key(char key_in) {
 void gui_toggle_start_menu(void) {
     search_open = 0;
     if (g_st >= 2) { g_st = 1; }
-    else if (wm_get_window_count() == 0) { g_st = 2; }
+    else { g_st = 2; }
     m_idx = 0;
 }
 void gui_open_search(void) { g_st = 1; search_open = 1; search_len = 0; search_buf[0] = 0; search_sel = 0; update_search_results(); }
@@ -729,9 +729,8 @@ void start_gui(void) {
         if (clicked) {
             /* Start button */
             if (!click_handled && point_in_rect(cx, cy, margin, taskbar_y, start_btn_w, TASKBAR_H)) {
-                if (g_st >= 2) { search_open = 0; g_st = 1; }
-                else if (wm_get_window_count() == 0) { search_open = 0; g_st = 2; }
-                m_idx = 0; click_handled = 1;
+                gui_toggle_start_menu();
+                click_handled = 1;
             }
 
             /* Search button */
