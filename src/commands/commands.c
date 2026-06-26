@@ -453,14 +453,20 @@ void execute_command(char* input) {
         gpu_device_t* gpu = gpu_get_primary();
         if (!gpu) {
             print_string("\n  No GPU detected or driver not initialized.\n");
+            print_string("  Acceleration: Software fallback\n");
         } else {
             print_string("\n  GPU Info:\n");
             print_string("    Name: "); print_string(gpu->name); print_string("\n");
+            print_string("    Vendor: 0x"); 
+            char buf[16]; itoa(gpu->vendor_id, buf); print_string(buf);
+            print_string(" Device: 0x"); itoa(gpu->device_id, buf); print_string(buf);
+            print_string("\n  Resolution: "); itoa(gpu->width, buf); print_string(buf); print_string("x"); itoa(gpu->height, buf); print_string(buf); print_string("\n");
             
             uint32_t caps = gpu_get_capabilities();
             print_string("    Capabilities:\n");
             if (caps & GPU_CAP_2D) print_string("      [ YES ] 2D Acceleration (Compatible Mode)\n");
             if (caps & GPU_CAP_3D) print_string("      [ YES ] 3D Acceleration (Hardware Ready)\n");
+            if (caps == 0) print_string("      [Software] CPU-based rendering\n");
             
             if (caps & GPU_CAP_3D) {
                 print_string("\n  Hardware 3D Test: RCS Pipeline infrastructure present.\n");

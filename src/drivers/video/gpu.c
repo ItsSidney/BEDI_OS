@@ -16,6 +16,7 @@ extern uint64_t hhdm_offset;
 #define GPU_FB_VIRT      0xFFFFA00000000000
 
 extern void serial_puts(const char* s);
+extern void itoa(uint64_t n, char* s);
 
 static inline int abs_int(int v) { return v < 0 ? -v : v; }
 
@@ -30,8 +31,15 @@ static uint64_t get_pci_bar_addr(pci_device_t* pci, int bar_idx) {
 void gpu_init(void) {
     serial_puts("[GPU] Initializing...\n");
     int pci_count = pci_get_device_count();
+    serial_puts("[GPU] PCI devices: ");
+    char buf[32]; itoa(pci_count, buf); serial_puts(buf); serial_puts("\n");
     for (int i = 0; i < pci_count; i++) {
         pci_device_t* pci = pci_get_device(i);
+        serial_puts("[GPU] PCI device: "); 
+        itoa(pci->vendor_id, buf); serial_puts(" vendor="); serial_puts(buf);
+        itoa(pci->device_id, buf); serial_puts(" device="); serial_puts(buf);
+        itoa(pci->class_id, buf); serial_puts(" class="); serial_puts(buf);
+        serial_puts("\n");
         
         // 1. Check for Intel GPU
         if (pci->vendor_id == 0x8086 && pci->class_id == 0x03) {
@@ -126,18 +134,23 @@ void gpu_init(void) {
         if (pci->vendor_id == 0x1234 && pci->device_id == 0x1111) {
             primary_gpu.vendor_id = pci->vendor_id;
             primary_gpu.device_id = pci->device_id;
-            primary_gpu.initialized = 0;
-            primary_gpu.driver = &virtio_gpu_driver;
+            primary_gpu.initialized = 1;
+            primary_gpu.driver = NULL;
 
             const char* name = "Standard VGA (Compatible Mode)";
             int k = 0;
             while (name[k]) { primary_gpu.name[k] = name[k]; k++; }
             primary_gpu.name[k] = 0;
-            
-            if (primary_gpu.driver->init(&primary_gpu) == 0) {
-                has_gpu = 1;
-                return;
-            }
+
+            extern uint32_t get_fb_width();
+            extern uint32_t get_fb_height();
+            extern uint32_t gfx_get_stride();
+            primary_gpu.width = get_fb_width();
+            primary_gpu.height = get_fb_height();
+            primary_gpu.pitch = gfx_get_stride() * 4;
+
+            has_gpu = 1;
+            return;
         }
     }
 }
