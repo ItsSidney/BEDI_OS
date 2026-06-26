@@ -317,7 +317,7 @@ void draw_taskbar() {
     int desk_start_x = desk_area_x;
     for (int i = 0; i < DESKTOP_COUNT; i++) {
         int dx = desk_start_x + i * (desk_w + desk_gap);
-        int dy = taskbar_y - desk_h - 2;
+        int dy = taskbar_y + 4;
         int hover = point_in_rect(mx, my, dx, dy, desk_w, desk_h);
         int is_current = (i == wm_get_current_desktop());
         uint32_t box_bg = is_current ? tab_active : (hover ? border : (p->theme == 0 ? 0x16181E : 0xE5E7EB));
@@ -668,7 +668,12 @@ void gui_handle_menu_key(char key_in) {
     }
 }
 
-void gui_toggle_start_menu(void) { search_open = 0; if (g_st >= 2) g_st = 1; else g_st = 2; m_idx = 0; }
+void gui_toggle_start_menu(void) {
+    search_open = 0;
+    if (g_st >= 2) { g_st = 1; }
+    else if (wm_get_window_count() == 0) { g_st = 2; }
+    m_idx = 0;
+}
 void gui_open_search(void) { g_st = 1; search_open = 1; search_len = 0; search_buf[0] = 0; search_sel = 0; update_search_results(); }
 void gui_toggle_search(void) { if (search_open) search_open = 0; else gui_open_search(); }
 int gui_is_menu_open(void) { return g_st >= 2; }
@@ -753,7 +758,7 @@ void start_gui(void) {
             if (!click_handled) {
                 for (int i = 0; i < DESKTOP_COUNT; i++) {
                     int dx = desk_start_x + i * (desk_w + desk_gap);
-                    int dy = taskbar_y - desk_h - 2;
+                    int dy = taskbar_y + 4;
                     if (point_in_rect(cx, cy, dx, dy, desk_w, desk_h)) {
                         wm_set_current_desktop(i);
                         click_handled = 1;
