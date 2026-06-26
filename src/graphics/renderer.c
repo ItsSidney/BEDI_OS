@@ -143,9 +143,14 @@ static uint32_t shade(vec3_t normal, uint32_t base, vec3_t light_dir) {
 }
 
 void renderer_draw_triangle(renderer_t* r, mesh_tri_t* tri) {
+    if (!r || !tri) return;
     float x0 = tri->v[0].pos.x, y0 = tri->v[0].pos.y, z0 = tri->v[0].pos.z;
     float x1 = tri->v[1].pos.x, y1 = tri->v[1].pos.y, z1 = tri->v[1].pos.z;
     float x2 = tri->v[2].pos.x, y2 = tri->v[2].pos.y, z2 = tri->v[2].pos.z;
+
+    if (x0 == x1 && y0 == y1) return;
+    if (x1 == x2 && y1 == y2) return;
+    if (x0 == x2 && y0 == y2) return;
 
     int ix0 = (int)x0, iy0 = (int)y0, ix1 = (int)x1, iy1 = (int)y1, ix2 = (int)x2, iy2 = (int)y2;
 
@@ -211,9 +216,7 @@ void renderer_draw_mesh(renderer_t* r, float* mvp, mesh_tri_t* tris, int count, 
             transform_vertex(&screen[i].v[j].pos, mvp, tris[i].v[j].pos);
             screen[i].v[j].normal = tris[i].v[j].normal;
         }
-        screen[i].color = base_color;
-        int front = (screen[i].v[1].pos.x - screen[i].v[0].pos.x) * (screen[i].v[2].pos.y - screen[i].v[0].pos.y) -
-                    (screen[i].v[1].pos.y - screen[i].v[0].pos.y) * (screen[i].v[2].pos.x - screen[i].v[0].pos.x);
-        if (front < 0) renderer_draw_triangle(r, &screen[i]);
+        screen[i].color = tris[i].color;
+        renderer_draw_triangle(r, &screen[i]);
     }
 }
