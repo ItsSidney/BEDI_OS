@@ -29,6 +29,7 @@ extern void pci_scanner_app(void);
 extern void system_app(void);
 extern void text_editor(void);
 extern void cube_3d_app(void);
+extern void mandelbrot_app(void);
 extern void bdrowser(void);
 extern void calendar_app(void);
 extern void process_viewer_app(void);
@@ -169,14 +170,14 @@ static const char* system_menu[] = { "PCI Scanner", "System" };
 #define SYSTEM_MENU_COUNT 2
 static const char* games_menu[] = { "Piano", "Snake", "Mines", "Tetris", "Pairs", "2048", "Flappy Bird", "Sudoku" };
 #define GAMES_MENU_COUNT 8
-static const char* demo_menu[] = { "Teacup" };
-#define DEMO_MENU_COUNT 1
+static const char* demo_menu[] = { "Teacup", "Mandelbrot" };
+#define DEMO_MENU_COUNT 2
 static const char* accessibility_menu[] = { "On-Screen Keyboard" };
 #define ACCESSIBILITY_MENU_COUNT 1
 static const char* graphics_menu[] = { "Image Viewer" };
 #define GRAPHICS_MENU_COUNT 1
 
-static const char* all_items[] = { "Calculator", "File Explorer", "PCI Scanner", "System App", "Text Editor", "Teacup", "Terminal", "Process Viewer", "Bdrowser", "Calendar", "Weather", "Piano", "Snake", "Mines", "Clock", "Tetris", "Pairs", "2048", "Flappy Bird", "On-Screen Keyboard", "Image Viewer", "Sudoku", 0 };
+static const char* all_items[] = { "Calculator", "File Explorer", "PCI Scanner", "System App", "Text Editor", "Teacup", "Mandelbrot", "Terminal", "Process Viewer", "Bdrowser", "Calendar", "Weather", "Piano", "Snake", "Mines", "Clock", "Tetris", "Pairs", "2048", "Flappy Bird", "On-Screen Keyboard", "Image Viewer", "Sudoku", 0 };
 
 void draw_premium_wallpaper() {
     uint32_t fw = get_fb_width(), fh = get_fb_height();
@@ -569,22 +570,23 @@ static void launch_item(int global_idx) {
     else if (global_idx == 3) system_app();
     else if (global_idx == 4) text_editor();
     else if (global_idx == 5) cube_3d_app();
-    else if (global_idx == 6) terminal_app();
-    else if (global_idx == 7) process_viewer_app();
-    else if (global_idx == 8) bdrowser();
-    else if (global_idx == 9) calendar_app();
-    else if (global_idx == 10) weather_app();
-    else if (global_idx == 11) piano_app();
-    else if (global_idx == 12) snake_app();
-    else if (global_idx == 13) mines_app();
-    else if (global_idx == 14) clock_app();
-    else if (global_idx == 15) tetris_app();
-    else if (global_idx == 16) pairs_app();
-    else if (global_idx == 17) game_2048_app();
-    else if (global_idx == 18) flappy_app();
-    else if (global_idx == 19) osk_app();
-    else if (global_idx == 20) imgview_app();
-    else if (global_idx == 21) sudoku_app();
+    else if (global_idx == 6) mandelbrot_app();
+    else if (global_idx == 7) terminal_app();
+    else if (global_idx == 8) process_viewer_app();
+    else if (global_idx == 9) bdrowser();
+    else if (global_idx == 10) calendar_app();
+    else if (global_idx == 11) weather_app();
+    else if (global_idx == 12) piano_app();
+    else if (global_idx == 13) snake_app();
+    else if (global_idx == 14) mines_app();
+    else if (global_idx == 15) clock_app();
+    else if (global_idx == 16) tetris_app();
+    else if (global_idx == 17) pairs_app();
+    else if (global_idx == 18) game_2048_app();
+    else if (global_idx == 19) flappy_app();
+    else if (global_idx == 20) osk_app();
+    else if (global_idx == 21) imgview_app();
+    else if (global_idx == 22) sudoku_app();
 }
 
 static void handle_menu_click(int cx, int cy) {
@@ -630,8 +632,9 @@ static void handle_menu_click(int cx, int cy) {
             else if (idx == 1) system_app();
         } else if (g_st == 6) {
             g_st = 1;
-            if (idx == 0) cube_3d_app();
-        } else if (g_st == 7) {
+            if      (idx == 0) cube_3d_app();
+            else if (idx == 1) mandelbrot_app();
+        }else if (g_st == 7) {
             g_st = 1;
             if      (idx == 0) piano_app();
             else if (idx == 1) snake_app();

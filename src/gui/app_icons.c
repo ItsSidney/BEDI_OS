@@ -563,6 +563,17 @@ static void draw_pro_graphics(int x, int y) {
     gfx_fill_rect(x+15, y+19, 2, 1, 0xF87171);
 }
 
+
+static void draw_pro_mandelbrot(int x, int y) {
+    // Fractal-like icon: colorful nested squares
+    gfx_fill_rect(x+2, y+2, 20, 20, 0x0A0D16);
+    gfx_draw_rect_outline(x+2, y+2, 20, 20, 1, 0x1E293B);
+    gfx_fill_rect(x+4, y+4, 16, 16, 0x7C3AED);
+    gfx_fill_rect(x+6, y+6, 12, 12, 0x2563EB);
+    gfx_fill_rect(x+8, y+8,  8,  8, 0x059669);
+    gfx_fill_rect(x+10, y+10, 4, 4, 0xFBBF24);
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────
 void draw_app_icon(const char* name, int x, int y) {
     if (!name) goto fallback;
@@ -596,6 +607,7 @@ void draw_app_icon(const char* name, int x, int y) {
     else if (name[0]=='2') draw_pro_2048(x, y);                   // "2048"
     else if (name[0]=='S'&&name[1]=='u') draw_pro_sudoku(x, y);   // "Sudoku"
     else if (name[0]=='G'&&name[1]=='r') draw_pro_graphics(x, y); // "Graphics"
+    else if (name[0]=='M'&&name[1]=='a') draw_pro_mandelbrot(x, y); // "Mandelbrot"
     else { fallback:
         gfx_fill_rect(x+4, y+4, 16, 16, 0x334155);
         gfx_draw_rect_outline(x+4, y+4, 16, 16, 1, 0x1E293B);
