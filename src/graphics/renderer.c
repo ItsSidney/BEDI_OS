@@ -121,25 +121,9 @@ void renderer_init(renderer_t* r, uint32_t* zbuf, uint32_t w, uint32_t h) {
 }
 
 void renderer_clear(renderer_t* r, uint32_t color) {
-    uint32_t* fb = gfx_get_back_buffer();
-    uint32_t w = gfx_get_fb_width();
-    uint32_t h = gfx_get_fb_height();
-    for (uint32_t i = 0; i < w * h; i++) {
-        fb[i] = color;
+    for (uint32_t i = 0; i < r->width * r->height; i++) {
         r->zbuffer[i] = 0xFFFFFFFF;
     }
-}
-
-static uint32_t shade(vec3_t normal, uint32_t base, vec3_t light_dir) {
-    float ndotl = normal.x*light_dir.x + normal.y*light_dir.y + normal.z*light_dir.z;
-    float diffuse = clampf(ndotl, 0.0f, 1.0f);
-    float ambient = 0.25f;
-    float intensity = ambient + diffuse * 0.75f;
-
-    uint8_t r = (uint8_t)(((base >> 16) & 0xFF) * intensity);
-    uint8_t g = (uint8_t)(((base >> 8) & 0xFF) * intensity);
-    uint8_t b = (uint8_t)((base & 0xFF) * intensity);
-    return (r << 16) | (g << 8) | b;
 }
 
 void renderer_draw_triangle(renderer_t* r, mesh_tri_t* tri) {
@@ -194,7 +178,7 @@ void renderer_draw_triangle(renderer_t* r, mesh_tri_t* tri) {
                 };
                 float nl = n.x*n.x + n.y*n.y + n.z*n.z;
                 if (nl > 0.0001f) { float inv = 1.0f / nl; n.x*=inv; n.y*=inv; n.z*=inv; }
-                put_pixel(x, y, shade(n, tri->color, (vec3_t){0.577f, -0.577f, 0.577f}));
+                put_pixel(x, y, tri->color);
             }
         }
     }
