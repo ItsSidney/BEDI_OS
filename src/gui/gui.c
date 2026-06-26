@@ -60,7 +60,6 @@ static int prev_mouse_btn = 0;
 static int all_apps_panel_open = 0;
 static int all_apps_scroll = 0;
 static int all_apps_hover_idx = -1;
-static int desktop_switcher_hover = -1;
 static int app_dock_hover_idx = -1;
 static int app_dock_right_click_idx = -1;
 
@@ -267,9 +266,29 @@ void draw_taskbar() {
     int sep1_x = search_x + search_btn_w + gap / 2;
     gfx_draw_vline(sep1_x, taskbar_y + 8, taskbar_h - 16, border);
 
+    /* Desktop switcher (always visible, left of tabs) */
+    int desk_w = 28, desk_h = 22, desk_gap = 4;
+    int desk_area_w = DESKTOP_COUNT * (desk_w + desk_gap) - desk_gap;
+    int desk_area_x = sep1_x + gap + 4;
+    int desk_start_x = desk_area_x;
+    for (int i = 0; i < DESKTOP_COUNT; i++) {
+        int dx = desk_start_x + i * (desk_w + desk_gap);
+        int dy = taskbar_y + 4;
+        int hover = point_in_rect(mx, my, dx, dy, desk_w, desk_h);
+        int is_current = (i == wm_get_current_desktop());
+        uint32_t box_bg = is_current ? tab_active : (hover ? border : (p->theme == 0 ? 0x16181E : 0xE5E7EB));
+        uint32_t txt_clr = is_current ? text_clr : muted;
+        gfx_fill_rect_rounded(dx, dy, desk_w, desk_h, 4, box_bg);
+        gfx_draw_rect_rounded_outline(dx, dy, desk_w, desk_h, 4, 1, border);
+        char num[2];
+        num[0] = '1' + i;
+        num[1] = 0;
+        gfx_draw_string_transparent(dx + 8, dy + 3, num, txt_clr);
+    }
+
     /* Middle: window tabs */
-    int tab_area_x = sep1_x + gap / 2;
-    int right_reserved = 150 + 8 + 120 + 8; /* tray + gap + desktop switcher + gap */
+    int tab_area_x = desk_area_x + desk_area_w + gap + 4;
+    int right_reserved = 150 + 8; /* tray + gap */
     int tab_area_w = fw - tab_area_x - right_reserved;
     if (tab_area_w < 100) tab_area_w = 100;
 
@@ -307,28 +326,6 @@ void draw_taskbar() {
         if (tw > tab_w - 16) tw = tab_w - 16;
         gfx_draw_string_transparent(wx + (tab_w - tw) / 2, tab_y + (tab_h - 12) / 2, short_title, tab_text);
         wx += tab_w + gap + 2;
-    }
-
-    if (open_windows == 0) {
-        /* Desktop switcher (right taskbar area) */
-        int desk_w = 28, desk_h = 22, desk_gap = 4;
-        int desk_area_w = DESKTOP_COUNT * (desk_w + desk_gap) - desk_gap;
-        int desk_area_x = fw - 150 - margin - 8 - desk_area_w;
-        int desk_start_x = desk_area_x;
-        for (int i = 0; i < DESKTOP_COUNT; i++) {
-            int dx = desk_start_x + i * (desk_w + desk_gap);
-            int dy = taskbar_y + 4;
-            int hover = point_in_rect(mx, my, dx, dy, desk_w, desk_h);
-            int is_current = (i == wm_get_current_desktop());
-            uint32_t box_bg = is_current ? tab_active : (hover ? border : (p->theme == 0 ? 0x16181E : 0xE5E7EB));
-            uint32_t txt_clr = is_current ? text_clr : muted;
-            gfx_fill_rect_rounded(dx, dy, desk_w, desk_h, 4, box_bg);
-            gfx_draw_rect_rounded_outline(dx, dy, desk_w, desk_h, 4, 1, border);
-            char num[2];
-            num[0] = '1' + i;
-            num[1] = 0;
-            gfx_draw_string_transparent(dx + 8, dy + 3, num, txt_clr);
-        }
     }
 
     /* Right: volume grid square + clock tray */
@@ -721,10 +718,9 @@ void start_gui(void) {
         int tab_end_x = tab_area_x + open_windows * (tab_w + gap + 2) - 2;
 
         /* Desktop switcher bounds */
-        int desk_w = 24, desk_h = 28, desk_gap = 4;
+        int desk_w = 28, desk_h = 22, desk_gap = 4;
         int desk_area_w = DESKTOP_COUNT * (desk_w + desk_gap) - desk_gap;
-        int desk_area_x = fw - 150 - margin - 8 - desk_area_w;
-        if (desk_area_x < tab_end_x + 16) desk_area_x = tab_end_x + 16;
+        int desk_area_x = sep1_x + gap + 4;
         int desk_start_x = desk_area_x;
 
         if (clicked) {
@@ -758,9 +754,9 @@ void start_gui(void) {
             }
 
             /* Desktop switcher */
-            if (!click_handled && open_windows == 0) {
+            if (!click_handled) {
                 for (int i = 0; i < DESKTOP_COUNT; i++) {
-                    int dx = desk_start_x + i * (desk_w + desk_gap);
+                    int dx = sep1_x + gap + 4 + i * (desk_w + desk_gap);
                     int dy = taskbar_y + 4;
                     if (point_in_rect(cx, cy, dx, dy, desk_w, desk_h)) {
                         wm_set_current_desktop(i);
