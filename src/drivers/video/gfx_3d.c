@@ -1,217 +1,272 @@
-#include "drivers/video/gpu.h"
-#include "drivers/video/gfx.h"
-#include "drivers/video/framebuffer.h"
-#include "gui/gui.h"
+#include "graphics/renderer.h"
 
-#define PI 3.14159265f
+/* Coarse Utah teapot mesh - triangles with normals */
+typedef struct { float x,y,z; float nx,ny,nz; } teapot_vert_t;
 
 static float my_sin(float x);
 static float my_cos(float x);
-static vec3_t project(vec3_t v, float width, float height);
-static vec3_t rotate_x(vec3_t v, float angle);
-static vec3_t rotate_y(vec3_t v, float angle);
-static vec3_t rotate_z(vec3_t v, float angle);
 
 static float my_sin(float x) {
-    while (x > PI) x -= 2 * PI;
-    while (x < -PI) x += 2 * PI;
+    while (x > 3.14159265f) x -= 6.28318530f;
+    while (x < -3.14159265f) x += 6.28318530f;
     float x2 = x * x;
     return x * (1.0f - x2 * (1.0f/6.0f - x2 * (1.0f/120.0f)));
 }
 
 static float my_cos(float x) {
-    return my_sin(x + PI/2.0f);
+    x += 1.57079632f;
+    while (x > 3.14159265f) x -= 6.28318530f;
+    while (x < -3.14159265f) x += 6.28318530f;
+    float x2 = x * x;
+    float s = x * (1.0f - x2 * (1.0f/6.0f - x2 * (1.0f/120.0f)));
+    return s;
 }
 
-void gfx_3d_init(void) {
+static const teapot_vert_t gBody[] = {
+    /* body bottom ring */
+    { 0.0000f, 0.0000f, 1.0000f, 0.0f, 1.0f, 0.0f},
+    { 0.2588f, 0.0000f, 0.9659f, 0.0f, 1.0f, 0.0f},
+    { 0.5000f, 0.0000f, 0.8660f, 0.0f, 1.0f, 0.0f},
+    { 0.7071f, 0.0000f, 0.7071f, 0.0f, 1.0f, 0.0f},
+    { 0.8660f, 0.0000f, 0.5000f, 0.0f, 1.0f, 0.0f},
+    { 0.9659f, 0.0000f, 0.2588f, 0.0f, 1.0f, 0.0f},
+    { 1.0000f, 0.0000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    { 0.9659f, 0.0000f,-0.2588f, 0.0f, 1.0f, 0.0f},
+    { 0.8660f, 0.0000f,-0.5000f, 0.0f, 1.0f, 0.0f},
+    { 0.7071f, 0.0000f,-0.7071f, 0.0f, 1.0f, 0.0f},
+    { 0.5000f, 0.0000f,-0.8660f, 0.0f, 1.0f, 0.0f},
+    { 0.2588f, 0.0000f,-0.9659f, 0.0f, 1.0f, 0.0f},
+    { 0.0000f, 0.0000f,-1.0000f, 0.0f, 1.0f, 0.0f},
+    {-0.2588f, 0.0000f,-0.9659f, 0.0f, 1.0f, 0.0f},
+    {-0.5000f, 0.0000f,-0.8660f, 0.0f, 1.0f, 0.0f},
+    {-0.7071f, 0.0000f,-0.7071f, 0.0f, 1.0f, 0.0f},
+    {-0.8660f, 0.0000f,-0.5000f, 0.0f, 1.0f, 0.0f},
+    {-0.9659f, 0.0000f,-0.2588f, 0.0f, 1.0f, 0.0f},
+    {-1.0000f, 0.0000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    {-0.9659f, 0.0000f, 0.2588f, 0.0f, 1.0f, 0.0f},
+    {-0.8660f, 0.0000f, 0.5000f, 0.0f, 1.0f, 0.0f},
+    {-0.7071f, 0.0000f, 0.7071f, 0.0f, 1.0f, 0.0f},
+    {-0.5000f, 0.0000f, 0.8660f, 0.0f, 1.0f, 0.0f},
+    {-0.2588f, 0.0000f, 0.9659f, 0.0f, 1.0f, 0.0f}
+};
+
+static const teapot_vert_t gBody2[] = {
+    { 0.0000f, 0.1000f, 0.9500f, 0.0f, 1.0f, 0.0f},
+    { 0.2450f, 0.1000f, 0.9170f, 0.0f, 1.0f, 0.0f},
+    { 0.4750f, 0.1000f, 0.8220f, 0.0f, 1.0f, 0.0f},
+    { 0.6700f, 0.1000f, 0.6700f, 0.0f, 1.0f, 0.0f},
+    { 0.8220f, 0.1000f, 0.4750f, 0.0f, 1.0f, 0.0f},
+    { 0.9170f, 0.1000f, 0.2450f, 0.0f, 1.0f, 0.0f},
+    { 0.9500f, 0.1000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    { 0.9170f, 0.1000f,-0.2450f, 0.0f, 1.0f, 0.0f},
+    { 0.8220f, 0.1000f,-0.4750f, 0.0f, 1.0f, 0.0f},
+    { 0.6700f, 0.1000f,-0.6700f, 0.0f, 1.0f, 0.0f},
+    { 0.4750f, 0.1000f,-0.8220f, 0.0f, 1.0f, 0.0f},
+    { 0.2450f, 0.1000f,-0.9170f, 0.0f, 1.0f, 0.0f},
+    { 0.0000f, 0.1000f,-0.9500f, 0.0f, 1.0f, 0.0f},
+    {-0.2450f, 0.1000f,-0.9170f, 0.0f, 1.0f, 0.0f},
+    {-0.4750f, 0.1000f,-0.8220f, 0.0f, 1.0f, 0.0f},
+    {-0.6700f, 0.1000f,-0.6700f, 0.0f, 1.0f, 0.0f},
+    {-0.8220f, 0.1000f,-0.4750f, 0.0f, 1.0f, 0.0f},
+    {-0.9170f, 0.1000f,-0.2450f, 0.0f, 1.0f, 0.0f},
+    {-0.9500f, 0.1000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    {-0.9170f, 0.1000f, 0.2450f, 0.0f, 1.0f, 0.0f},
+    {-0.8220f, 0.1000f, 0.4750f, 0.0f, 1.0f, 0.0f},
+    {-0.6700f, 0.1000f, 0.6700f, 0.0f, 1.0f, 0.0f},
+    {-0.4750f, 0.1000f, 0.8220f, 0.0f, 1.0f, 0.0f},
+    {-0.2450f, 0.1000f, 0.9170f, 0.0f, 1.0f, 0.0f}
+};
+
+static const teapot_vert_t gBody3[] = {
+    { 0.0000f, 0.2000f, 0.9000f, 0.0f, 1.0f, 0.0f},
+    { 0.2300f, 0.2000f, 0.8690f, 0.0f, 1.0f, 0.0f},
+    { 0.4500f, 0.2000f, 0.7790f, 0.0f, 1.0f, 0.0f},
+    { 0.6400f, 0.2000f, 0.6400f, 0.0f, 1.0f, 0.0f},
+    { 0.7790f, 0.2000f, 0.4500f, 0.0f, 1.0f, 0.0f},
+    { 0.8690f, 0.2000f, 0.2300f, 0.0f, 1.0f, 0.0f},
+    { 0.9000f, 0.2000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    { 0.8690f, 0.2000f,-0.2300f, 0.0f, 1.0f, 0.0f},
+    { 0.7790f, 0.2000f,-0.4500f, 0.0f, 1.0f, 0.0f},
+    { 0.6400f, 0.2000f,-0.6400f, 0.0f, 1.0f, 0.0f},
+    { 0.4500f, 0.2000f,-0.7790f, 0.0f, 1.0f, 0.0f},
+    { 0.2300f, 0.2000f,-0.8690f, 0.0f, 1.0f, 0.0f},
+    { 0.0000f, 0.2000f,-0.9000f, 0.0f, 1.0f, 0.0f},
+    {-0.2300f, 0.2000f,-0.8690f, 0.0f, 1.0f, 0.0f},
+    {-0.4500f, 0.2000f,-0.7790f, 0.0f, 1.0f, 0.0f},
+    {-0.6400f, 0.2000f,-0.6400f, 0.0f, 1.0f, 0.0f},
+    {-0.7790f, 0.2000f,-0.4500f, 0.0f, 1.0f, 0.0f},
+    {-0.8690f, 0.2000f,-0.2300f, 0.0f, 1.0f, 0.0f},
+    {-0.9000f, 0.2000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    {-0.8690f, 0.2000f, 0.2300f, 0.0f, 1.0f, 0.0f},
+    {-0.7790f, 0.2000f, 0.4500f, 0.0f, 1.0f, 0.0f},
+    {-0.6400f, 0.2000f, 0.6400f, 0.0f, 1.0f, 0.0f},
+    {-0.4500f, 0.2000f, 0.7790f, 0.0f, 1.0f, 0.0f},
+    {-0.2300f, 0.2000f, 0.8690f, 0.0f, 1.0f, 0.0f}
+};
+
+static const teapot_vert_t gBody4[] = {
+    { 0.0000f, 0.3000f, 0.8500f, 0.0f, 1.0f, 0.0f},
+    { 0.2180f, 0.3000f, 0.8200f, 0.0f, 1.0f, 0.0f},
+    { 0.4250f, 0.3000f, 0.7350f, 0.0f, 1.0f, 0.0f},
+    { 0.6000f, 0.3000f, 0.6000f, 0.0f, 1.0f, 0.0f},
+    { 0.7350f, 0.3000f, 0.4250f, 0.0f, 1.0f, 0.0f},
+    { 0.8200f, 0.3000f, 0.2180f, 0.0f, 1.0f, 0.0f},
+    { 0.8500f, 0.3000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    { 0.8200f, 0.3000f,-0.2180f, 0.0f, 1.0f, 0.0f},
+    { 0.7350f, 0.3000f,-0.4250f, 0.0f, 1.0f, 0.0f},
+    { 0.6000f, 0.3000f,-0.6000f, 0.0f, 1.0f, 0.0f},
+    { 0.4250f, 0.3000f,-0.7350f, 0.0f, 1.0f, 0.0f},
+    { 0.2180f, 0.3000f,-0.8200f, 0.0f, 1.0f, 0.0f},
+    { 0.0000f, 0.3000f,-0.8500f, 0.0f, 1.0f, 0.0f},
+    {-0.2180f, 0.3000f,-0.8200f, 0.0f, 1.0f, 0.0f},
+    {-0.4250f, 0.3000f,-0.7350f, 0.0f, 1.0f, 0.0f},
+    {-0.6000f, 0.3000f,-0.6000f, 0.0f, 1.0f, 0.0f},
+    {-0.7350f, 0.3000f,-0.4250f, 0.0f, 1.0f, 0.0f},
+    {-0.8200f, 0.3000f,-0.2180f, 0.0f, 1.0f, 0.0f},
+    {-0.8500f, 0.3000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    {-0.8200f, 0.3000f, 0.2180f, 0.0f, 1.0f, 0.0f},
+    {-0.7350f, 0.3000f, 0.4250f, 0.0f, 1.0f, 0.0f},
+    {-0.6000f, 0.3000f, 0.6000f, 0.0f, 1.0f, 0.0f},
+    {-0.4250f, 0.3000f, 0.7350f, 0.0f, 1.0f, 0.0f},
+    {-0.2180f, 0.3000f, 0.8200f, 0.0f, 1.0f, 0.0f}
+};
+
+static const teapot_vert_t gBody5[] = {
+    { 0.0000f, 0.4000f, 0.8000f, 0.0f, 1.0f, 0.0f},
+    { 0.2000f, 0.4000f, 0.7730f, 0.0f, 1.0f, 0.0f},
+    { 0.4000f, 0.4000f, 0.6930f, 0.0f, 1.0f, 0.0f},
+    { 0.5730f, 0.4000f, 0.5730f, 0.0f, 1.0f, 0.0f},
+    { 0.6930f, 0.4000f, 0.4000f, 0.0f, 1.0f, 0.0f},
+    { 0.7730f, 0.4000f, 0.2000f, 0.0f, 1.0f, 0.0f},
+    { 0.8000f, 0.4000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    { 0.7730f, 0.4000f,-0.2000f, 0.0f, 1.0f, 0.0f},
+    { 0.6930f, 0.4000f,-0.4000f, 0.0f, 1.0f, 0.0f},
+    { 0.5730f, 0.4000f,-0.5730f, 0.0f, 1.0f, 0.0f},
+    { 0.4000f, 0.4000f,-0.6930f, 0.0f, 1.0f, 0.0f},
+    { 0.2000f, 0.4000f,-0.7730f, 0.0f, 1.0f, 0.0f},
+    { 0.0000f, 0.4000f,-0.8000f, 0.0f, 1.0f, 0.0f},
+    {-0.2000f, 0.4000f,-0.7730f, 0.0f, 1.0f, 0.0f},
+    {-0.4000f, 0.4000f,-0.6930f, 0.0f, 1.0f, 0.0f},
+    {-0.5730f, 0.4000f,-0.5730f, 0.0f, 1.0f, 0.0f},
+    {-0.6930f, 0.4000f,-0.4000f, 0.0f, 1.0f, 0.0f},
+    {-0.7730f, 0.4000f,-0.2000f, 0.0f, 1.0f, 0.0f},
+    {-0.8000f, 0.4000f, 0.0000f, 0.0f, 1.0f, 0.0f},
+    {-0.7730f, 0.4000f, 0.2000f, 0.0f, 1.0f, 0.0f},
+    {-0.6930f, 0.4000f, 0.4000f, 0.0f, 1.0f, 0.0f},
+    {-0.5730f, 0.4000f, 0.5730f, 0.0f, 1.0f, 0.0f},
+    {-0.4000f, 0.4000f, 0.6930f, 0.0f, 1.0f, 0.0f},
+    {-0.2000f, 0.4000f, 0.7730f, 0.0f, 1.0f, 0.0f}
+};
+
+#define TEAPOT_SEGS 24
+static mesh_tri_t gTris[800];
+static int gTriCount = 0;
+
+static void add_tri(teapot_vert_t a, teapot_vert_t b, teapot_vert_t c, uint32_t col) {
+    if (gTriCount >= 800) return;
+    mesh_tri_t* t = &gTris[gTriCount++];
+    t->v[0].pos.x = a.x; t->v[0].pos.y = a.y; t->v[0].pos.z = a.z;
+    t->v[0].normal.x = a.nx; t->v[0].normal.y = a.ny; t->v[0].normal.z = a.nz;
+    t->v[1].pos.x = b.x; t->v[1].pos.y = b.y; t->v[1].pos.z = b.z;
+    t->v[1].normal.x = b.nx; t->v[1].normal.y = b.ny; t->v[1].normal.z = b.nz;
+    t->v[2].pos.x = c.x; t->v[2].pos.y = c.y; t->v[2].pos.z = c.z;
+    t->v[2].normal.x = c.nx; t->v[2].normal.y = c.ny; t->v[2].normal.z = c.nz;
+    t->color = col;
 }
 
-static vec3_t project(vec3_t v, float width, float height) {
-    float z_offset = 5.0f;
-    float factor = 400.0f;
-    float fov = factor / (v.z + z_offset);
-    vec3_t p;
-    p.x = (v.x * fov) + width / 2.0f;
-    p.y = (v.y * fov) + height / 2.0f;
-    p.z = v.z;
-    return p;
+static uint32_t lerp_color(uint32_t a, uint32_t b, float t) {
+    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    uint8_t ar = (a>>16)&0xFF, ag = (a>>8)&0xFF, ab = a&0xFF;
+    uint8_t br = (b>>16)&0xFF, bg = (b>>8)&0xFF, bb = b&0xFF;
+    uint8_t rr = (uint8_t)(ar + (br-ar)*t);
+    uint8_t rg = (uint8_t)(ag + (bg-ag)*t);
+    uint8_t rb = (uint8_t)(ab + (bb-ab)*t);
+    return (rr<<16)|(rg<<8)|rb;
 }
 
-static vec3_t rotate_x(vec3_t v, float angle) {
-    float c = my_cos(angle);
-    float s = my_sin(angle);
-    vec3_t r = {v.x, v.y * c - v.z * s, v.y * s + v.z * c};
-    return r;
-}
-
-static vec3_t rotate_y(vec3_t v, float angle) {
-    float c = my_cos(angle);
-    float s = my_sin(angle);
-    vec3_t r = {v.x * c + v.z * s, v.y, -v.x * s + v.z * c};
-    return r;
-}
-
-static vec3_t rotate_z(vec3_t v, float angle) {
-    float c = my_cos(angle);
-    float s = my_sin(angle);
-    vec3_t r = {v.x * c - v.y * s, v.x * s + v.y * c, v.z};
-    return r;
-}
-
-static void swap(int* a, int* b) { int t = *a; *a = *b; *b = t; }
-
-static void draw_filled_triangle(int x0, int y0, int x1, int y1, int x2, int y2, uint32_t color, int cw, int ch) {
-    if (y0 > y1) { swap(&x0, &x1); swap(&y0, &y1); }
-    if (y0 > y2) { swap(&x0, &x2); swap(&y0, &y2); }
-    if (y1 > y2) { swap(&x1, &x2); swap(&y1, &y2); }
-
-    int total_h = y2 - y0;
-    if (total_h == 0) return;
-
-    uint32_t fb_h = get_fb_height();
-    uint32_t fb_w = get_fb_width();
-
-    for (int y = y0; y <= y2; y++) {
-        if (y < 0 || y >= (int)fb_h) continue;
-        int seg_h = y1 - y0;
-        int seg_h2 = y2 - y1;
-        float t1 = (total_h == 0) ? 0 : (float)(y - y0) / total_h;
-        float t2 = (seg_h == 0) ? 1 : (float)(y - y0) / seg_h;
-        float t3 = (seg_h2 == 0) ? 1 : (float)(y - y1) / seg_h2;
-
-        int a_x, b_x;
-        if (y < y1) {
-            a_x = x0 + (x2 - x0) * t1;
-            b_x = x0 + (x1 - x0) * t2;
-        } else {
-            a_x = x0 + (x2 - x0) * t1;
-            b_x = x1 + (x2 - x1) * t3;
-        }
-        if (a_x > b_x) swap(&a_x, &b_x);
-        if (a_x < 0) a_x = 0;
-        if (b_x >= (int)fb_w) b_x = fb_w - 1;
-        for (int x = a_x; x <= b_x; x++) {
-            put_pixel(x, y, color);
-        }
-    }
-}
-
-#define TEACUP_SEGMENTS 24
-
-static void draw_body_ring(vec3_t* p, int n, int offset, uint32_t color) {
+static void build_ring(const teapot_vert_t* ring, int n, const teapot_vert_t* next, uint32_t c1, uint32_t c2) {
     for (int i = 0; i < n; i++) {
-        int ni = (i + 1) % n;
-        gfx_draw_line((int)p[offset + i].x, (int)p[offset + i].y,
-                      (int)p[offset + ni].x, (int)p[offset + ni].y, color);
+        int ni = (i+1)%n;
+        float t = (float)i / (float)n;
+        add_tri(ring[i], ring[ni], next[i], lerp_color(c1, c2, t));
+        add_tri(ring[ni], next[ni], next[i], lerp_color(c1, c2, t));
     }
+}
+
+static void build_cap(const teapot_vert_t* ring, int n, float cy, uint32_t c) {
+    int mid = n/2;
+    for (int i = 0; i < n; i++) {
+        int ni = (i+1)%n;
+        add_tri(ring[i], ring[ni], (teapot_vert_t){0,cy,0,0,1,0}, c);
+    }
+}
+
+static void build_teapot(void) {
+    gTriCount = 0;
+    uint32_t c1 = 0xCC4444;
+    uint32_t c2 = 0x44CC44;
+    uint32_t c3 = 0x4444CC;
+    uint32_t c4 = 0xCCCC44;
+    uint32_t c5 = 0xCC44CC;
+
+    /* body rings */
+    build_ring(gBody, 24, gBody2, c1, c2);
+    build_ring(gBody2, 24, gBody3, c2, c3);
+    build_ring(gBody3, 24, gBody4, c3, c4);
+    build_ring(gBody4, 24, gBody5, c4, c5);
+    build_cap(gBody5, 24, 0.4f, c5);
+    build_cap(gBody, 24, 0.0f, c1);
+
+    /* lid */
+    const int kLidSegs = 12;
+    float lr[12], lh[12];
+    for (int i = 0; i < kLidSegs; i++) {
+        float a = 2.0f*3.14159265f*i/kLidSegs;
+        lr[i] = 0.35f * my_cos(a);
+        lh[i] = 0.45f + 0.10f * my_sin(a);
+    }
+    teapot_vert_t lid1[12], lid2[12], lid3[12], lid4[12];
+    for (int i = 0; i < kLidSegs; i++) {
+        lid1[i] = (teapot_vert_t){lr[i], lh[i], lr[i], 0, 1, 0};
+        lid2[i] = (teapot_vert_t){lr[i]*0.85f, lh[i]+0.08f, lr[i]*0.85f, 0, 1, 0};
+        lid3[i] = (teapot_vert_t){lr[i]*0.6f, lh[i]+0.16f, lr[i]*0.6f, 0, 1, 0};
+        lid4[i] = (teapot_vert_t){lr[i]*0.2f, lh[i]+0.22f, lr[i]*0.2f, 0, 1, 0};
+    }
+    build_ring(lid1, kLidSegs, lid2, c5, c2);
+    build_ring(lid2, kLidSegs, lid3, c2, c3);
+    build_ring(lid3, kLidSegs, lid4, c3, c1);
+    build_cap(lid4, kLidSegs, lh[0]+0.22f, c1);
+}
+
+void gfx_3d_render_teapot(int rx, int ry, int rw, int rh, float ax, float ay) {
+    build_teapot();
+
+    float mvp[16];
+    float model[16], view[16], proj[16], tmp[16];
+
+    mat4_identity(model);
+    mat4_rotate_y(model, ay);
+    mat4_rotate_x(model, ax);
+    mat4_translate(tmp, 0.0f, -0.2f, -5.0f);
+    mat4_mul(model, tmp, model);
+
+    vec3_t eye = {0, 1.5f, -3.0f};
+    vec3_t center = {0, 0.2f, 0};
+    vec3_t up = {0, 1, 0};
+    mat4_lookat(view, eye, center, up);
+    mat4_perspective(proj, 1.2f, (float)rw/(float)rh, 0.1f, 100.0f);
+
+    mat4_mul(tmp, proj, view);
+    mat4_mul(mvp, tmp, model);
+
+    /* zbuffer allocated on stack - max 1920x1080 */
+    uint32_t zbuf[1920*1080];
+    renderer_t rr;
+    renderer_init(&rr, zbuf, rw, rh);
+    renderer_clear(&rr, 0xFF181818);
+    renderer_draw_mesh(&rr, mvp, gTris, gTriCount, 0xFFCC8844);
 }
 
 void gfx_3d_render_teacup(int rx, int ry, int rw, int rh, float ax, float ay) {
-    int n = TEACUP_SEGMENTS;
-    vec3_t verts[200];
-    int vi = 0;
-
-    float radii[] = {0.5f, 0.5f, 0.85f, 1.0f, 1.05f};
-    float heights[] = {-1.3f, -1.0f, 0.0f, 1.0f, 1.2f};
-    int rings = 5;
-
-    for (int r = 0; r < rings; r++) {
-        for (int i = 0; i < n; i++) {
-            float ang = 2.0f * PI * i / n;
-            verts[vi].x = radii[r] * my_cos(ang);
-            verts[vi].y = heights[r];
-            verts[vi].z = radii[r] * my_sin(ang);
-            vi++;
-        }
-    }
-
-    int handle_start = vi;
-    for (int i = 0; i <= 6; i++) {
-        float t = (float)i / 6.0f;
-        float a = PI * 0.15f + t * PI * 0.7f;
-        float hx = 0.9f + 0.8f * my_cos(a);
-        float hy = 0.5f - 0.7f * my_sin(a);
-        verts[vi].x = hx - 0.18f; verts[vi].y = hy; verts[vi].z = -0.12f; vi++;
-        verts[vi].x = hx + 0.18f; verts[vi].y = hy; verts[vi].z = 0.12f; vi++;
-    }
-
-    vec3_t proj[200];
-    for (int i = 0; i < vi; i++) {
-        vec3_t v = verts[i];
-        v = rotate_x(v, ax);
-        v = rotate_y(v, ay);
-        v = rotate_z(v, ax * 0.15f);
-        vec3_t p = project(v, (float)rw, (float)rh);
-        p.x += rx;
-        p.y += ry;
-        proj[i] = p;
-    }
-
-    uint32_t accent = get_accent_color();
-    uint32_t dark_c = gfx_darken(accent, 50);
-    uint32_t mid_c = accent;
-    uint32_t handle_c = gfx_darken(accent, 25);
-    uint32_t inner_c = 0x2A1F0E;
-
-    for (int r = 0; r < rings - 1; r++) {
-        for (int i = 0; i < n; i++) {
-            int ni = (i + 1) % n;
-            int a = r * n + i;
-            int b = r * n + ni;
-            int c = (r + 1) * n + i;
-            int d = (r + 1) * n + ni;
-
-            float t = (float)r / (rings - 2);
-            uint32_t col = gfx_lerp_color(dark_c, mid_c, (int)(t * 100), 100);
-
-            draw_filled_triangle(proj[a].x, proj[a].y, proj[b].x, proj[b].y, proj[c].x, proj[c].y, col, rw, rh);
-            draw_filled_triangle(proj[b].x, proj[b].y, proj[c].x, proj[c].y, proj[d].x, proj[d].y, col, rw, rh);
-        }
-    }
-
-    float bot_cx = 0, bot_cy = 0;
-    for (int i = 0; i < n; i++) {
-        bot_cx += proj[i].x; bot_cy += proj[i].y;
-    }
-    bot_cx /= n; bot_cy /= n;
-    for (int i = 0; i < n; i++) {
-        int ni = (i + 1) % n;
-        draw_filled_triangle(proj[i].x, proj[i].y, proj[ni].x, proj[ni].y, bot_cx, bot_cy, dark_c, rw, rh);
-    }
-
-    int top_r = (rings - 1) * n;
-    float top_cx = 0, top_cy = 0;
-    for (int i = 0; i < n; i++) {
-        top_cx += proj[top_r + i].x; top_cy += proj[top_r + i].y;
-    }
-    top_cx /= n; top_cy /= n;
-    for (int i = 0; i < n; i++) {
-        int ni = (i + 1) % n;
-        draw_filled_triangle(proj[top_r + i].x, proj[top_r + i].y,
-                             proj[top_r + ni].x, proj[top_r + ni].y,
-                             top_cx, top_cy, inner_c, rw, rh);
-    }
-
-    for (int i = 0; i < 6; i++) {
-        int a = handle_start + i * 2;
-        int b = handle_start + i * 2 + 1;
-        int c = handle_start + (i + 1) * 2;
-        int d = handle_start + (i + 1) * 2 + 1;
-        draw_filled_triangle(proj[a].x, proj[a].y, proj[b].x, proj[b].y, proj[c].x, proj[c].y, handle_c, rw, rh);
-        draw_filled_triangle(proj[b].x, proj[b].y, proj[c].x, proj[c].y, proj[d].x, proj[d].y, handle_c, rw, rh);
-    }
-
-    uint32_t outline = gfx_darken(accent, 35);
-    draw_body_ring(proj, n, 0, outline);
-    draw_body_ring(proj, n, (rings - 1) * n, outline);
-    for (int i = 0; i < n; i += 4) {
-        int a = i;
-        int b = (rings - 1) * n + i;
-        gfx_draw_line((int)proj[a].x, (int)proj[a].y,
-                      (int)proj[b].x, (int)proj[b].y, outline);
-    }
-
-    int cx2 = rx + rw / 2;
-    int cy2 = ry + rh / 2;
-    gfx_draw_line(cx2 - 20, cy2 - 8, cx2 - 8, cy2 - 20, 0x66FFFFFF);
+    gfx_3d_render_teapot(rx, ry, rw, rh, ax, ay);
 }
