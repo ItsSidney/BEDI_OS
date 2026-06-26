@@ -41,12 +41,20 @@ uint32_t timer_get_ms(void) {
 }
 
 void timer_calibrate(void) {
-    // Use RTC seconds as a reference to calibrate the actual PIT tick rate.
-    unsigned char before = read_cmos(0x00);
+    // Measure ticks over exactly 3 RTC seconds.
+    unsigned char base = read_cmos(0x00);
+    // Wait for start of next second.
+    while (read_cmos(0x00) == base);
     uint64_t start = timer_ticks;
-    while (read_cmos(0x00) == before);
+    unsigned char target = read_cmos(0x00);
+    // Advance 3 seconds.
+    for (int i = 0; i < 3; i++) {
+        while (read_cmos(0x00) == target);
+        target = read_cmos(0x00);
+    }
     uint64_t elapsed = timer_ticks - start;
     if (elapsed > 100) {
-        timer_hz = (uint32_t)(elapsed);
+        timer_hz = (uint32_t)(elapsed / 3);
+        timer_detected = 1;
     }
 }
