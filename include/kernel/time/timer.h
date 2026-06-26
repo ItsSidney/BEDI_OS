@@ -7,4 +7,6 @@ void timer_calibrate(void);
 void sleep_ms(uint32_t ms);
 uint32_t timer_get_ms(void);
 
+extern uint32_t timer_hz;
+
 #endif

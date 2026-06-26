@@ -491,6 +491,9 @@ void execute_command(char* input) {
         print_string("  Elapsed ticks: ");
         char buf[32]; itoa((uint64_t)elapsed, buf); print_string(buf);
         print_string("\n");
+        print_string("  Calibrated Hz: ");
+        itoa((uint64_t)timer_hz, buf); print_string(buf);
+        print_string("\n");
         if (elapsed >= 2500 && elapsed <= 3500) {
             print_string("  Result: Timer is close to 1kHz (expected ~3000 ticks in 3s)\n");
         } else if (elapsed < 10) {
