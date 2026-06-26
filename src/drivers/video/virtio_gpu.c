@@ -5,6 +5,8 @@
 #include "kernel/mem/vmm.h"
 #include "kernel/mem/kheap.h"
 
+static inline int abs_int(int v) { return v < 0 ? -v : v; }
+
 static struct virtio_pci_common_cfg* common_cfg;
 static uint32_t* notify_reg;
 static virtqueue_t control_vq;
@@ -109,76 +111,186 @@ static int virtio_gpu_init(gpu_device_t* gpu) {
 static int virtio_gpu_accel_2d(gpu_device_t* gpu, gpu_2d_params_t* params) {
     if (!gpu->initialized) return -1;
 
-    if (params->op == GPU_OP_FILL) {
-        // Software fill then transfer to host for VirtIO
-        // Real VirtIO acceleration would use 3D commands (Virgl)
-        // For 2D, we just flush the region
-        struct virtio_gpu_transfer_to_host_2d xfer = {0};
-        xfer.hdr.type = VIRTIO_GPU_CTRL_TRANSFER_TO_HOST_2D;
-        xfer.resource_id = main_resource_id;
-        xfer.r.x = params->dst_x;
-        xfer.r.y = params->dst_y;
-        xfer.r.width = params->width;
-        xfer.r.height = params->height;
-        
-        struct virtio_gpu_ctrl_hdr resp = {0};
-        virtio_gpu_send_cmd(&xfer, sizeof(xfer), &resp, sizeof(resp));
-        
-        struct virtio_gpu_resource_flush flush = {0};
-        flush.hdr.type = VIRTIO_GPU_CTRL_RESOURCE_FLUSH;
-        flush.resource_id = main_resource_id;
-        flush.r = xfer.r;
-        virtio_gpu_send_cmd(&flush, sizeof(flush), &resp, sizeof(resp));
-        
-        return 0;
-    }
+    extern uint32_t* get_fb_ptr();
+    extern uint32_t gfx_get_stride();
+    uint32_t* fb = get_fb_ptr();
+    uint32_t stride = gfx_get_stride();
+    int x = params->dst_x;
+    int y = params->dst_y;
+    int w = params->width;
+    int h = params->height;
 
-    if (params->op == GPU_OP_BLEND) {
-        // Software blend fallback for VirtIO (Real acceleration would use Virgl 3D)
-        extern uint32_t* get_fb_ptr();
-        extern uint32_t gfx_get_stride();
-        uint32_t* fb = get_fb_ptr();
-        uint32_t stride = gfx_get_stride();
+    if (params->op == GPU_OP_FILL) {
+        for (int i = 0; i < h; i++) {
+            int fy = y + i;
+            if (fy < 0 || fy >= (int)gpu->height) continue;
+            uint32_t* row = fb + fy * stride + x;
+            for (int j = 0; j < w; j++) {
+                int fx = x + j;
+                if (fx < 0 || fx >= (int)gpu->width) continue;
+                row[j] = params->color;
+            }
+        }
+    } else if (params->op == GPU_OP_BLIT) {
         uint32_t* src = (uint32_t*)params->src_ptr;
-        
-        for (int i = 0; i < params->height; i++) {
-            uint32_t* dst_row = fb + (params->dst_y + i) * stride + params->dst_x;
-            for (int j = 0; j < params->width; j++) {
-                uint32_t s = src ? src[i * params->width + j] : params->color;
+        if (!src) return -1;
+        for (int i = 0; i < h; i++) {
+            int fy = y + i;
+            int sy = params->src_y + i;
+            if (fy < 0 || fy >= (int)gpu->height) continue;
+            if (sy < 0 || sy >= (int)gpu->height) continue;
+            uint32_t* dst_row = fb + fy * stride + x;
+            uint32_t* src_row = src + sy * w + params->src_x;
+            for (int j = 0; j < w; j++) {
+                int fx = x + j;
+                int sx = params->src_x + j;
+                if (fx < 0 || fx >= (int)gpu->width) continue;
+                if (sx < 0 || sx >= (int)gpu->width) continue;
+                dst_row[j] = src_row[j];
+            }
+        }
+    } else if (params->op == GPU_OP_BLEND) {
+        uint32_t* src = (uint32_t*)params->src_ptr;
+        uint8_t alpha = params->alpha;
+        uint8_t inv_a = 255 - alpha;
+        for (int i = 0; i < h; i++) {
+            int fy = y + i;
+            if (fy < 0 || fy >= (int)gpu->height) continue;
+            uint32_t* dst_row = fb + fy * stride + x;
+            uint32_t s = src ? src[i * w] : params->color;
+            uint8_t sr = (s >> 16) & 0xFF, sg = (s >> 8) & 0xFF, sb = s & 0xFF;
+            for (int j = 0; j < w; j++) {
+                int fx = x + j;
+                if (fx < 0 || fx >= (int)gpu->width) continue;
                 uint32_t d = dst_row[j];
-                uint8_t a = params->alpha, inv_a = 255 - a;
-                uint8_t r = (((s >> 16) & 0xFF) * a + ((d >> 16) & 0xFF) * inv_a) / 255;
-                uint8_t g = (((s >> 8) & 0xFF) * a + ((d >> 8) & 0xFF) * inv_a) / 255;
-                uint8_t b = ((s & 0xFF) * a + (d & 0xFF) * inv_a) / 255;
+                uint8_t dr = (d >> 16) & 0xFF, dg = (d >> 8) & 0xFF, db = d & 0xFF;
+                uint8_t r = (sr * alpha + dr * inv_a) / 255;
+                uint8_t g = (sg * alpha + dg * inv_a) / 255;
+                uint8_t b = (sb * alpha + db * inv_a) / 255;
                 dst_row[j] = (r << 16) | (g << 8) | b;
             }
         }
-
-        // Flush the modified region
-        struct virtio_gpu_transfer_to_host_2d xfer = {0};
-        xfer.hdr.type = VIRTIO_GPU_CTRL_TRANSFER_TO_HOST_2D;
-        xfer.resource_id = main_resource_id;
-        xfer.r.x = params->dst_x; xfer.r.y = params->dst_y;
-        xfer.r.width = params->width; xfer.r.height = params->height;
-        
-        struct virtio_gpu_ctrl_hdr resp = {0};
-        virtio_gpu_send_cmd(&xfer, sizeof(xfer), &resp, sizeof(resp));
-        
-        struct virtio_gpu_resource_flush flush = {0};
-        flush.hdr.type = VIRTIO_GPU_CTRL_RESOURCE_FLUSH;
-        flush.resource_id = main_resource_id;
-        flush.r = xfer.r;
-        virtio_gpu_send_cmd(&flush, sizeof(flush), &resp, sizeof(resp));
-        return 0;
+    } else if (params->op == GPU_OP_LINE) {
+        int x0 = x, y0 = y, x1 = params->src_x, y1 = params->src_y;
+        uint32_t color = params->color;
+        int dx = abs_int(x1 - x0), sx = x0 < x1 ? 1 : -1;
+        int dy = -abs_int(y1 - y0), sy = y0 < y1 ? 1 : -1;
+        int err = dx + dy;
+        while (1) {
+            if (x0 >= 0 && x0 < (int)gpu->width && y0 >= 0 && y0 < (int)gpu->height)
+                fb[y0 * stride + x0] = color;
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = 2 * err;
+            if (e2 >= dy) { err += dy; x0 += sx; }
+            if (e2 <= dx) { err += dx; y0 += sy; }
+        }
+    } else if (params->op == GPU_OP_RECT) {
+        for (int i = 0; i < w; i++) {
+            if (y >= 0 && y < (int)gpu->height) {
+                int fx = x + i;
+                if (fx >= 0 && fx < (int)gpu->width) fb[y * stride + fx] = params->color;
+            }
+            int by = y + h - 1;
+            if (by >= 0 && by < (int)gpu->height) {
+                int fx = x + i;
+                if (fx >= 0 && fx < (int)gpu->width) fb[by * stride + fx] = params->color;
+            }
+        }
+        for (int i = 0; i < h; i++) {
+            if (x >= 0 && x < (int)gpu->width) {
+                int fy = y + i;
+                if (fy >= 0 && fy < (int)gpu->height) fb[fy * stride + x] = params->color;
+            }
+            int bx = x + w - 1;
+            if (bx >= 0 && bx < (int)gpu->width) {
+                int fy = y + i;
+                if (fy >= 0 && fy < (int)gpu->height) fb[fy * stride + bx] = params->color;
+            }
+        }
+    } else if (params->op == GPU_OP_COPY) {
+        for (int i = 0; i < h; i++) {
+            int fy = y + i;
+            int sy = params->src_y + i;
+            if (fy < 0 || fy >= (int)gpu->height) continue;
+            if (sy < 0 || sy >= (int)gpu->height) continue;
+            uint32_t* dst_row = fb + fy * stride + x;
+            uint32_t* src_row = fb + sy * stride + params->src_x;
+            for (int j = 0; j < w; j++) {
+                int fx = x + j;
+                int sx = params->src_x + j;
+                if (fx < 0 || fx >= (int)gpu->width) continue;
+                if (sx < 0 || sx >= (int)gpu->width) continue;
+                dst_row[j] = src_row[j];
+            }
+        }
+    } else {
+        return -1;
     }
-    return -1;
+
+    struct virtio_gpu_transfer_to_host_2d xfer = {0};
+    xfer.hdr.type = VIRTIO_GPU_CTRL_TRANSFER_TO_HOST_2D;
+    xfer.resource_id = main_resource_id;
+    xfer.r.x = x; xfer.r.y = y;
+    xfer.r.width = w; xfer.r.height = h;
+
+    struct virtio_gpu_ctrl_hdr resp = {0};
+    virtio_gpu_send_cmd(&xfer, sizeof(xfer), &resp, sizeof(resp));
+
+    struct virtio_gpu_resource_flush flush = {0};
+    flush.hdr.type = VIRTIO_GPU_CTRL_RESOURCE_FLUSH;
+    flush.resource_id = main_resource_id;
+    flush.r = xfer.r;
+    virtio_gpu_send_cmd(&flush, sizeof(flush), &resp, sizeof(resp));
+
+    return 0;
 }
 
-static int virtio_gpu_accel_3d(gpu_device_t* gpu, void* cmd_buffer, size_t size) { 
-    (void)gpu; (void)cmd_buffer; (void)size;
-    extern void serial_puts(const char* s);
-    serial_puts("[VIRTIO-GPU] 3D Virgl command submitted\n");
-    return 0; // Success
+static int virtio_gpu_accel_3d(gpu_device_t* gpu, void* cmd_buffer, size_t size) {
+    if (!gpu->initialized) return -1;
+    extern uint32_t* get_fb_ptr();
+    extern uint32_t gfx_get_stride();
+    uint32_t* fb = get_fb_ptr();
+    uint32_t stride = gfx_get_stride();
+
+    // Minimal 3D command: expect exactly one triangle_t in cmd_buffer
+    if (!cmd_buffer || size < sizeof(triangle_t)) return -1;
+    triangle_t* tri = (triangle_t*)cmd_buffer;
+
+    // Simple bounding-box rasterization
+    int min_x = tri->p[0].x; if (tri->p[1].x < min_x) min_x = tri->p[1].x; if (tri->p[2].x < min_x) min_x = tri->p[2].x;
+    int min_y = tri->p[0].y; if (tri->p[1].y < min_y) min_y = tri->p[1].y; if (tri->p[2].y < min_y) min_y = tri->p[2].y;
+    int max_x = tri->p[0].x; if (tri->p[1].x > max_x) max_x = tri->p[1].x; if (tri->p[2].x > max_x) max_x = tri->p[2].x;
+    int max_y = tri->p[0].y; if (tri->p[1].y > max_y) max_y = tri->p[1].y; if (tri->p[2].y > max_y) max_y = tri->p[2].y;
+
+    if (min_x < 0) min_x = 0;
+    if (min_y < 0) min_y = 0;
+    if (max_x >= (int)gpu->width) max_x = gpu->width - 1;
+    if (max_y >= (int)gpu->height) max_y = gpu->height - 1;
+
+    uint32_t color = tri->color;
+    for (int y = min_y; y <= max_y; y++) {
+        for (int x = min_x; x <= max_x; x++) {
+            fb[y * stride + x] = color;
+        }
+    }
+
+    struct virtio_gpu_transfer_to_host_2d xfer = {0};
+    xfer.hdr.type = VIRTIO_GPU_CTRL_TRANSFER_TO_HOST_2D;
+    xfer.resource_id = main_resource_id;
+    xfer.r.x = min_x; xfer.r.y = min_y;
+    xfer.r.width = (uint32_t)(max_x - min_x + 1);
+    xfer.r.height = (uint32_t)(max_y - min_y + 1);
+
+    struct virtio_gpu_ctrl_hdr resp = {0};
+    virtio_gpu_send_cmd(&xfer, sizeof(xfer), &resp, sizeof(resp));
+
+    struct virtio_gpu_resource_flush flush = {0};
+    flush.hdr.type = VIRTIO_GPU_CTRL_RESOURCE_FLUSH;
+    flush.resource_id = main_resource_id;
+    flush.r = xfer.r;
+    virtio_gpu_send_cmd(&flush, sizeof(flush), &resp, sizeof(resp));
+
+    return 0;
 }
 
 static uint32_t virtio_gpu_get_caps(gpu_device_t* gpu) {

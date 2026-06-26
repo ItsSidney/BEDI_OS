@@ -17,6 +17,8 @@ extern uint64_t hhdm_offset;
 
 extern void serial_puts(const char* s);
 
+static inline int abs_int(int v) { return v < 0 ? -v : v; }
+
 static uint64_t get_pci_bar_addr(pci_device_t* pci, int bar_idx) {
     uint32_t bar_val = pci->bar[bar_idx];
     if ((bar_val & 0x6) == 0x04) { // 64-bit BAR
@@ -147,13 +149,155 @@ int gpu_accel_fill(int x, int y, int w, int h, uint32_t color) {
     return 0;
 }
 
+int gpu_accel_blit(void* src, int sx, int sy, int dx, int dy, int w, int h) {
+    gpu_2d_params_t p = { .op = GPU_OP_BLIT, .src_x = sx, .src_y = sy, .dst_x = dx, .dst_y = dy, .width = w, .height = h, .src_ptr = src };
+    if (has_gpu && primary_gpu.driver && primary_gpu.driver->accel_2d) {
+        int r = primary_gpu.driver->accel_2d(&primary_gpu, &p);
+        if (r == 0) return 0;
+    }
+    extern uint32_t* gfx_get_back_buffer(void);
+    extern uint32_t  gfx_get_stride(void);
+    uint32_t* bb = gfx_get_back_buffer();
+    uint32_t  stride = gfx_get_stride();
+    uint32_t* s = (uint32_t*)src;
+    for (int i = 0; i < h; i++) {
+        int fy = dy + i;
+        int fsy = sy + i;
+        if (fy < 0 || fy >= (int)gfx_get_fb_height()) continue;
+        if (fsy < 0 || fsy >= (int)gfx_get_fb_height()) continue;
+        uint32_t* dst_row = bb + fy * stride + dx;
+        uint32_t* src_row = s + fsy * w + sx;
+        for (int j = 0; j < w; j++) {
+            int fx = dx + j;
+            int fsx = sx + j;
+            if (fx < 0 || fx >= (int)gfx_get_fb_width()) continue;
+            if (fsx < 0 || fsx >= (int)gfx_get_fb_width()) continue;
+            dst_row[j] = src_row[j];
+        }
+    }
+    return 0;
+}
+
 int gpu_accel_blend(void* src, int dx, int dy, int w, int h, int alpha) {
     gpu_2d_params_t p = { .op = GPU_OP_BLEND, .dst_x = dx, .dst_y = dy, .width = w, .height = h, .src_ptr = src, .alpha = alpha };
-    if (!has_gpu || !primary_gpu.driver || !primary_gpu.driver->accel_2d) {
-        // software blend fallback would go here; currently unused
-        return -1;
+    if (has_gpu && primary_gpu.driver && primary_gpu.driver->accel_2d) {
+        int r = primary_gpu.driver->accel_2d(&primary_gpu, &p);
+        if (r == 0) return 0;
     }
-    return primary_gpu.driver->accel_2d(&primary_gpu, &p);
+    extern uint32_t* gfx_get_back_buffer(void);
+    extern uint32_t  gfx_get_stride(void);
+    uint32_t* bb = gfx_get_back_buffer();
+    uint32_t  stride = gfx_get_stride();
+    uint32_t* s = (uint32_t*)src;
+    uint8_t a = alpha, inv_a = 255 - a;
+    for (int i = 0; i < h; i++) {
+        int fy = dy + i;
+        if (fy < 0 || fy >= (int)gfx_get_fb_height()) continue;
+        uint32_t* dst_row = bb + fy * stride + dx;
+        uint32_t src_pix = s ? s[i * w] : 0;
+        uint8_t sr = (src_pix >> 16) & 0xFF, sg = (src_pix >> 8) & 0xFF, sb = src_pix & 0xFF;
+        for (int j = 0; j < w; j++) {
+            int fx = dx + j;
+            if (fx < 0 || fx >= (int)gfx_get_fb_width()) continue;
+            uint32_t d = dst_row[j];
+            uint8_t dr = (d >> 16) & 0xFF, dg = (d >> 8) & 0xFF, db = d & 0xFF;
+            uint8_t r = (sr * a + dr * inv_a) / 255;
+            uint8_t g = (sg * a + dg * inv_a) / 255;
+            uint8_t b = (sb * a + db * inv_a) / 255;
+            dst_row[j] = (r << 16) | (g << 8) | b;
+        }
+    }
+    return 0;
+}
+
+int gpu_accel_line(int x0, int y0, int x1, int y1, uint32_t color) {
+    gpu_2d_params_t p = { .op = GPU_OP_LINE, .dst_x = x0, .dst_y = y0, .src_x = x1, .src_y = y1, .width = 0, .height = 0, .color = color };
+    if (has_gpu && primary_gpu.driver && primary_gpu.driver->accel_2d) {
+        int r = primary_gpu.driver->accel_2d(&primary_gpu, &p);
+        if (r == 0) return 0;
+    }
+    extern uint32_t* gfx_get_back_buffer(void);
+    extern uint32_t  gfx_get_stride(void);
+    uint32_t* bb = gfx_get_back_buffer();
+    uint32_t  stride = gfx_get_stride();
+    int dx = abs_int(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs_int(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    while (1) {
+        if (x0 >= 0 && x0 < (int)gfx_get_fb_width() && y0 >= 0 && y0 < (int)gfx_get_fb_height())
+            bb[y0 * stride + x0] = color;
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+    return 0;
+}
+
+int gpu_accel_rect(int x, int y, int w, int h, uint32_t color) {
+    gpu_2d_params_t p = { .op = GPU_OP_RECT, .dst_x = x, .dst_y = y, .width = w, .height = h, .color = color };
+    if (has_gpu && primary_gpu.driver && primary_gpu.driver->accel_2d) {
+        int r = primary_gpu.driver->accel_2d(&primary_gpu, &p);
+        if (r == 0) return 0;
+    }
+    gfx_draw_rect_outline(x, y, w, h, 1, color);
+    return 0;
+}
+
+int gpu_accel_copy(int sx, int sy, int dx, int dy, int w, int h) {
+    gpu_2d_params_t p = { .op = GPU_OP_COPY, .src_x = sx, .src_y = sy, .dst_x = dx, .dst_y = dy, .width = w, .height = h };
+    if (has_gpu && primary_gpu.driver && primary_gpu.driver->accel_2d) {
+        int r = primary_gpu.driver->accel_2d(&primary_gpu, &p);
+        if (r == 0) return 0;
+    }
+    extern uint32_t* gfx_get_back_buffer(void);
+    extern uint32_t  gfx_get_stride(void);
+    uint32_t* bb = gfx_get_back_buffer();
+    uint32_t  stride = gfx_get_stride();
+    for (int i = 0; i < h; i++) {
+        int fy = dy + i;
+        int fsy = sy + i;
+        if (fy < 0 || fy >= (int)gfx_get_fb_height()) continue;
+        if (fsy < 0 || fsy >= (int)gfx_get_fb_height()) continue;
+        uint32_t* dst_row = bb + fy * stride + dx;
+        uint32_t* src_row = bb + fsy * stride + sx;
+        for (int j = 0; j < w; j++) {
+            int fx = dx + j;
+            int fsx = sx + j;
+            if (fx < 0 || fx >= (int)gfx_get_fb_width()) continue;
+            if (fsx < 0 || fsx >= (int)gfx_get_fb_width()) continue;
+            dst_row[j] = src_row[j];
+        }
+    }
+    return 0;
+}
+
+int gpu_accel_3d_tri(void* tri, size_t size) {
+    if (has_gpu && primary_gpu.driver && primary_gpu.driver->accel_3d) {
+        int r = primary_gpu.driver->accel_3d(&primary_gpu, tri, size);
+        if (r == 0) return 0;
+    }
+    // software fallback: solid-colored bounding box
+    if (!tri || size < sizeof(triangle_t)) return -1;
+    triangle_t* t = (triangle_t*)tri;
+    extern uint32_t* gfx_get_back_buffer(void);
+    extern uint32_t  gfx_get_stride(void);
+    uint32_t* bb = gfx_get_back_buffer();
+    uint32_t  stride = gfx_get_stride();
+    int min_x = t->p[0].x; if (t->p[1].x < min_x) min_x = t->p[1].x; if (t->p[2].x < min_x) min_x = t->p[2].x;
+    int min_y = t->p[0].y; if (t->p[1].y < min_y) min_y = t->p[1].y; if (t->p[2].y < min_y) min_y = t->p[2].y;
+    int max_x = t->p[0].x; if (t->p[1].x > max_x) max_x = t->p[1].x; if (t->p[2].x > max_x) max_x = t->p[2].x;
+    int max_y = t->p[0].y; if (t->p[1].y > max_y) max_y = t->p[1].y; if (t->p[2].y > max_y) max_y = t->p[2].y;
+    if (min_x < 0) min_x = 0;
+    if (min_y < 0) min_y = 0;
+    if (max_x >= (int)gfx_get_fb_width()) max_x = gfx_get_fb_width() - 1;
+    if (max_y >= (int)gfx_get_fb_height()) max_y = gfx_get_fb_height() - 1;
+    for (int y = min_y; y <= max_y; y++) {
+        for (int x = min_x; x <= max_x; x++) {
+            bb[y * stride + x] = t->color;
+        }
+    }
+    return 0;
 }
 
 uint32_t gpu_get_capabilities(void) {

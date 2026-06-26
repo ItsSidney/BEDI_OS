@@ -50,6 +50,9 @@ typedef struct {
 #define GPU_OP_BLIT  2
 #define GPU_OP_BLEND 3
 #define GPU_OP_3D_TRI 4
+#define GPU_OP_LINE  5
+#define GPU_OP_RECT  6
+#define GPU_OP_COPY  7
 
 #define GPU_CAP_2D (1 << 0)
 #define GPU_CAP_3D (1 << 1)
@@ -79,6 +82,10 @@ gpu_device_t* gpu_get_primary(void);
 int gpu_accel_fill(int x, int y, int w, int h, uint32_t color);
 int gpu_accel_blit(void* src, int sx, int sy, int dx, int dy, int w, int h);
 int gpu_accel_blend(void* src, int dx, int dy, int w, int h, int alpha);
+int gpu_accel_line(int x0, int y0, int x1, int y1, uint32_t color);
+int gpu_accel_rect(int x, int y, int w, int h, uint32_t color);
+int gpu_accel_copy(int sx, int sy, int dx, int dy, int w, int h);
+int gpu_accel_3d_tri(void* tri, size_t size);
 int gpu_accel_3d_test(void);
 uint32_t gpu_get_capabilities(void);
 void gpu_present(void);
