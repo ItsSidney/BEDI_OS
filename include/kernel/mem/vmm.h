@@ -31,5 +31,6 @@ int vmm_virt_mapped(uint64_t virt);
 void pmm_init(void);
 uint64_t pmm_alloc(void);
 void pmm_free(uint64_t phys);
+size_t pmm_free_count(void);
 
 #endif

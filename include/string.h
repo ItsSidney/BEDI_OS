@@ -13,5 +13,9 @@ void strcpy(char* dest, const char* src);
 int memcmp(const void* s1, const void* s2, size_t n);
 void itoa(uint64_t n, char* s);
 char* strchr(const char* s, int c);
+char* strrchr(const char* s, int c);
+char* strdup(const char* s);
+char* strstr(const char* h, const char* n);
+char* strncpy(char* dest, const char* src, int n);
 
 #endif

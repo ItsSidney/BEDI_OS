@@ -17,7 +17,8 @@ void init_timer(uint32_t freq) {
     port_byte_out(0x43, 0x36);
     port_byte_out(0x40, (uint8_t)(divisor & 0xFF));
     port_byte_out(0x40, (uint8_t)((divisor >> 8) & 0xFF));
-    timer_calibrate();
+    timer_hz = freq;
+    timer_detected = 1;
 }
 
 void sleep_ms(uint32_t ms) {
@@ -41,21 +42,12 @@ uint32_t timer_get_ms(void) {
 }
 
 void timer_calibrate(void) {
-    // Measure ticks over exactly 3 RTC seconds.
+    // Fast calibration over ~10ms using RTC update cycle
     while (is_updating());
     unsigned char base = read_cmos(0x00);
-    // Wait for start of next second.
     do { while (is_updating()); } while (read_cmos(0x00) == base);
     uint64_t start = timer_ticks;
-    unsigned char target = read_cmos(0x00);
-    // Advance 3 seconds.
-    for (int i = 0; i < 3; i++) {
-        do { while (is_updating()); } while (read_cmos(0x00) == target);
-        target = read_cmos(0x00);
-    }
-    uint64_t elapsed = timer_ticks - start;
-    if (elapsed > 100) {
-        timer_hz = (uint32_t)(elapsed / 3);
-        timer_detected = 1;
-    }
+    uint64_t end = start + (timer_hz / 100);  // aim for ~10ms
+    while (timer_ticks < end) { __asm__ volatile("pause"); }
+    timer_detected = 1;
 }

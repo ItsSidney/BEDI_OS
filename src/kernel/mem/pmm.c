@@ -74,3 +74,7 @@ uint64_t pmm_alloc(void) {
 void pmm_free(uint64_t phys) {
     free_pages_stack[free_pages_count++] = phys;
 }
+
+size_t pmm_free_count(void) {
+    return free_pages_count;
+}

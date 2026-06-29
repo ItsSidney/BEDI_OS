@@ -377,18 +377,28 @@ void gfx_draw_string_transparent(int x, int y, const char* str, uint32_t rgb) {
     uint32_t pixel = gfx_rgb_to_pixel(rgb);
     int s = gfx_scale;
     extern const uint8_t font8x16[];
+
+    int clip_x_min = clip_x0;
+    int clip_y_min = clip_y0;
+    int clip_x_max = clip_x1;
+    int clip_y_max = clip_y1;
+
     while (*str) {
         const uint8_t* glyph = &font8x16[(uint8_t)(*str) * 16];
         for (int gy = 0; gy < 16; gy++) {
+            int glyph_y = y + gy * s;
+            if (glyph_y + s <= clip_y_min || glyph_y >= clip_y_max) continue;
             for (int sy = 0; sy < s; sy++) {
-                int py = y + gy * s + sy;
-                if (py < 0 || (uint32_t)py >= fh) continue;
+                int py = glyph_y + sy;
+                if (py < clip_y_min || py >= clip_y_max) continue;
                 uint8_t row = glyph[gy];
                 for (int gx = 0; gx < 8; gx++) {
                     if (!(row & (0x80 >> gx))) continue;
+                    int glyph_x = x + gx * s;
+                    if (glyph_x + s <= clip_x_min || glyph_x >= clip_x_max) continue;
                     for (int sx = 0; sx < s; sx++) {
-                        int px = x + gx * s + sx;
-                        if (px < 0 || (uint32_t)px >= fw) continue;
+                        int px = glyph_x + sx;
+                        if (px < clip_x_min || px >= clip_x_max) continue;
                         bb[py * stride + px] = pixel;
                     }
                 }

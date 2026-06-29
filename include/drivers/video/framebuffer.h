@@ -18,6 +18,8 @@ void draw_box_vga(int x, int y, int w, int h, int vga_color);
 void draw_gradient_background();
 void draw_splash_screen(int step);
 void boot_log_add(const char* tag, const char* msg, uint32_t tag_color, uint32_t msg_color);
+void boot_log_add_hex(const char* tag, const char* msg, uint32_t tag_color, uint32_t msg_color,
+                       uint64_t hex_value, int hex_color_override);
 void draw_boot_log(void);
 void cache_background();
 void restore_background();
@@ -28,6 +30,12 @@ void print_char(char character, uint32_t color);
 void print_string_color(const char* message, int color);
 void print_string(const char* message);
 void print_backspace();
+
+/* BMP helpers */
+int fb_draw_bmp(int x, int y, const unsigned char* data, unsigned int len);
+int fb_get_width(void);
+int fb_get_height(void);
+uint32_t* fb_get_back_buffer(void);
 void set_cursor(int x, int y);
 void clear_terminal_cursor();
 void draw_terminal_cursor();

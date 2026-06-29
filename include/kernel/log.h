@@ -6,5 +6,7 @@
 void log_init(void);
 void klog(const char* s);
 void log_dump(void);
+const char* log_get_buffer(void);
+int log_get_size(void);
 
 #endif

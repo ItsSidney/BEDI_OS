@@ -14,6 +14,9 @@ extern void syscall_entry_stub();
 static uint64_t idle_rsp = 0;
 static uint64_t idle_stack[512];
 
+volatile uint64_t cpu_sched_ticks = 0;
+volatile uint64_t cpu_busy_ticks = 0;
+
 static void idle_loop(void) {
     while (1) {
         __asm__ volatile("sti; hlt");
@@ -310,16 +313,21 @@ uint64_t schedule(uint64_t current_rsp) {
         }
     } while (next_task != start_idx);
     
-    // If no other task is ready, check if start_idx is ready
     if (!found_ready && current_task_idx >= 0 && tasks[current_task_idx].state == TASK_READY) {
         next_task = current_task_idx;
         found_ready = 1;
     }
 
+    cpu_sched_ticks++;
+
     if (!found_ready) {
         current_task_idx = -1; // Switch to idle
         tss_set_user_rsp0((uint64_t)&idle_stack[512]);
         return idle_rsp;
+    }
+
+    if (next_task != current_task_idx) {
+        cpu_busy_ticks++;
     }
     
     current_task_idx = next_task;

@@ -1,17 +1,18 @@
-# Bedi-C Quick Start Guide
+# BEDI C (bedic) Quick Start Guide
 
-Bedi-C is a compact C-subset for BEDI OS.
+BEDIC is a compact scripting language for BEDI OS. It supports variables, math, strings, input/output, conditionals, loops, and boolean logic.
 
-## 1. The Basics
-Programs can use a `void main() { ... }` function or just a sequence of statements. Semicolons are optional!
+## 1. Program Structure
 
-**Script Style:**
+BEDIC programs can use a `void main() { ... }` function or just a sequence of top-level statements. Semicolons are optional.
+
+**Script style:**
 ```c
 print("Hello BEDI OS!", endl)
 exit(0)
 ```
 
-**Function Style:**
+**Function style:**
 ```c
 void main() {
     print("Hello", endl)
@@ -20,20 +21,28 @@ void main() {
 ```
 
 ## 2. Variables & Data Types
-Bedi-C supports `int` (32-bit signed), `double` (fixed-point decimal), and `string`.
+
+BEDIC supports four types:
+
+| Type | Description |
+| :--- | :--- |
+| `int` | 32-bit signed integer |
+| `double` | Fixed-point decimal (6 decimal places internally) |
+| `string` | Text string |
+| `bool` | Boolean (`true` / `false`) |
 
 ### Integers & Math
 ```c
 int a = 10
-int b = -5 // Supports negative numbers
-int sum = a + b  
-a++ // Increment
-b-- // Decrement
+int b = -5
+int sum = a + b
+a++        // Increment
+b--        // Decrement
 print("Sum: ", sum, endl)
 ```
 
 ### Decimals (`double`)
-Bedi-C supports `double` using fixed-point arithmetic (internal precision is 6 decimal places). You can use decimal literal notation.
+BEDIC supports `double` using fixed-point arithmetic. Decimal literals are supported.
 ```c
 double side_a = 8.0
 double side_b = 5.0
@@ -42,7 +51,6 @@ print("Ratio: ", ratio, endl) // Prints: 1.600000
 ```
 
 ### Strings
-You can store text in variables and reassign them.
 ```c
 string greeting = "Hello, Sidney!"
 print(greeting, endl)
@@ -52,8 +60,14 @@ greeting = "Welcome to "
 print(greeting, name, "!", endl)
 ```
 
+### Booleans
+```c
+bool active = true
+bool done = false
+print("Active: ", active, endl)
+```
+
 ## 3. Flow Control & Input
-Bedi-C supports `if-else`, `while`, `for` loops, and interactive input.
 
 ### If-Else
 ```c
@@ -64,8 +78,17 @@ if (a > b) {
 }
 ```
 
+### While Loops
+```c
+int i = 0
+while (i < 3) {
+    print("i: ", i, endl)
+    i++
+}
+```
+
 ### User Input (`input`)
-You can read values from the user. The `input()` function automatically handles parsing based on the variable's type.
+The `input()` function reads from the terminal. It automatically parses based on the variable's type.
 ```c
 print("Enter a whole number: ")
 int code
@@ -76,19 +99,117 @@ print("Enter a decimal: ")
 double measurement
 input(measurement)
 print("You entered: ", measurement, endl)
+
+print("Enter text: ")
+string name
+input(name)
+print("Hello, ", name, endl)
 ```
 
-### Loops
+## 4. Operators
+
+| Category | Operators |
+| :--- | :--- |
+| **Arithmetic** | `+`, `-`, `*`, `/`, `++`, `--` |
+| **Comparison** | `==`, `!=`, `<`, `>`, `<=`, `>=` |
+| **Logical** | `&&`, `||` |
+| **Assignment** | `=` |
+
+## 5. Built-in Functions
+
+| Function | Description |
+| :--- | :--- |
+| `print(...)` | Print values to terminal. Accepts strings, variables, and `endl`. |
+| `endl` | Print a newline. Use inside `print()`. |
+| `input(x)` | Read user input into variable `x`. Type is inferred from variable. |
+| `exit(n)` | Exit the program with status code `n`. |
+
+## 6. Comments
+
+Single-line comments are supported:
 ```c
-// WHILE Loop
-int i = 0
-while (i < 3) {
-    print("i: ", i, endl)
-    i++
+// This is a comment
+int x = 5  // Inline comment works too
+```
+
+## 7. String Escapes
+
+Use `\n` for newlines inside string literals:
+```c
+print("Line 1\nLine 2", endl)
+```
+
+## 8. Workflow
+
+1. **Write:** Use `bdim` editor or write a `.bc` file
+2. **Compile:** `bcc <file.bc>` (outputs `<file>.bin`)
+3. **Run:** `brun <file.bin>`
+
+## 9. Example Programs
+
+### Hello World
+```c
+print("Hello BEDI OS!", endl)
+```
+
+### Calculator
+```c
+void main() {
+    print("Enter first number: ")
+    int a
+    input(a)
+    
+    print("Enter second number: ")
+    int b
+    input(b)
+    
+    print("Sum: ", a + b, endl)
+    print("Product: ", a * b, endl)
+    
+    exit(0)
 }
 ```
 
-## 4. Language Reference
+### Temperature Converter
+```c
+void main() {
+    print("Enter Celsius: ")
+    double c
+    input(c)
+    
+    double f = c * 9 / 5 + 32
+    print("Fahrenheit: ", f, endl)
+    
+    exit(0)
+}
+```
+
+### Guessing Game
+```c
+void main() {
+    int secret = 42
+    int guess = 0
+    int tries = 0
+    
+    while (guess != secret) {
+        print("Guess: ")
+        input(guess)
+        tries++
+        
+        if (guess == secret) {
+            print("Correct! Tries: ", tries, endl)
+        } else if (guess < secret) {
+            print("Higher!", endl)
+        } else {
+            print("Lower!", endl)
+        }
+    }
+    
+    exit(0)
+}
+```
+
+## 10. Language Reference
 
 | Feature | Syntax |
 | :--- | :--- |
@@ -96,9 +217,6 @@ while (i < 3) {
 | **Arithmetic** | `+`, `-`, `*`, `/`, `++`, `--` |
 | **Comparison** | `==`, `!=`, `<`, `>`, `<=`, `>=` |
 | **Logical** | `&&`, `||` |
-| **Built-ins** | `print(...)`, `input(...)`, `exit(n)`, `endl` |
-
-## 5. Workflow
-1. **Write:** `bdim file.bc`
-2. **Compile:** `bcc file.bc` (outputs `file.bin`)
-3. **Run:** `brun file.bin`
+| **Control flow** | `if-else`, `while` |
+| **Input/Output** | `print(...)`, `input(x)`, `exit(n)`, `endl` |
+| **Comments** | `//` |

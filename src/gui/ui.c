@@ -10,6 +10,7 @@
 #include "drivers/audio/audio.h"
 #include "gui/gui.h"
 #include <stddef.h>
+#include <stdint.h>
 
 static int g_sound_win = -1;
 
@@ -34,9 +35,9 @@ static void sound_vol_up(int win_id, int btn_id) {
 
 static void sound_render(int id, int x, int y, int w, int h, int vx, int vy) {
     personalization_t* p = get_personalization();
-    uint32_t bg       = (p->theme == 0) ? 0x15171D : 0xF4F6F8;
-    uint32_t text_clr = (p->theme == 0) ? 0xE4E6EA : 0x202124;
-    uint32_t muted    = (p->theme == 0) ? 0x6D7079 : 0x9CA3AF;
+    uint32_t bg       = theme_get_color(THEME_ROLE_WINDOW_BG);
+    uint32_t text_clr = theme_get_color(THEME_ROLE_PRIMARY);
+    uint32_t muted    = theme_get_color(THEME_ROLE_SECONDARY);
     uint32_t accent   = get_accent_color();
     int vol = audio_get_master_volume();
 
@@ -55,13 +56,13 @@ static void sound_render(int id, int x, int y, int w, int h, int vx, int vy) {
     gfx_draw_string_transparent(x + 20, label_y + 14, audio_is_muted() ? "MUTED" : "ACTIVE", muted);
 
     int btn_y = label_y + 38;
-    gfx_fill_rect(x + 20, btn_y, 80, 28, muted);
-    gfx_draw_string_transparent(x + 32, btn_y + 8, "VOL -", 0x000000);
-    gfx_fill_rect(x + 120, btn_y, 80, 28, muted);
-    gfx_draw_string_transparent(x + 132, btn_y + 8, "VOL +", 0x000000);
-    gfx_fill_rect(x + 220, btn_y, 100, 28, audio_is_muted() ? accent : muted);
+    gfx_fill_rect_rounded(x + 20, btn_y, 80, 28, 8, theme_get_color(THEME_ROLE_BUTTON_BG));
+    gfx_draw_string_transparent(x + 32, btn_y + 8, "VOL -", theme_get_color(THEME_ROLE_BUTTON_TEXT));
+    gfx_fill_rect_rounded(x + 120, btn_y, 80, 28, 8, theme_get_color(THEME_ROLE_BUTTON_BG));
+    gfx_draw_string_transparent(x + 132, btn_y + 8, "VOL +", theme_get_color(THEME_ROLE_BUTTON_TEXT));
+    gfx_fill_rect_rounded(x + 220, btn_y, 100, 28, 8, audio_is_muted() ? theme_get_color(THEME_ROLE_ERROR) : theme_get_color(THEME_ROLE_BUTTON_BG));
     gfx_draw_string_transparent(x + 232, btn_y + 8, audio_is_muted() ? "UNMUTE" : "MUTE",
-                               audio_is_muted() ? 0x000000 : 0xFFFFFF);
+                               audio_is_muted() ? theme_get_color(THEME_ROLE_ON_PRIMARY) : theme_get_color(THEME_ROLE_ON_PRIMARY));
 }
 
 void show_sound_settings(void) {
@@ -79,7 +80,7 @@ void show_sound_settings(void) {
     g_sound_win = wm_open_window(x, y, w, h, "Sound Settings", get_accent_color(),
                                  sound_render, sound_on_key, NULL);
 
-    wm_add_button(g_sound_win, 1, 20, 110, 80, 28, "VOL -", 0x6B7280, 0x000000, sound_vol_down);
-    wm_add_button(g_sound_win, 2, 120, 110, 80, 28, "VOL +", 0x6B7280, 0x000000, sound_vol_up);
-    wm_add_button(g_sound_win, 3, 220, 110, 100, 28, "MUTE", 0xEF4444, 0xFFFFFF, sound_on_mute);
+    wm_add_button(g_sound_win, 1, 20, 110, 80, 28, "VOL -", theme_get_color(THEME_ROLE_BUTTON_BG), theme_get_color(THEME_ROLE_BUTTON_TEXT), sound_vol_down);
+    wm_add_button(g_sound_win, 2, 120, 110, 80, 28, "VOL +", theme_get_color(THEME_ROLE_BUTTON_BG), theme_get_color(THEME_ROLE_BUTTON_TEXT), sound_vol_up);
+    wm_add_button(g_sound_win, 3, 220, 110, 100, 28, "MUTE", theme_get_color(THEME_ROLE_ERROR), theme_get_color(THEME_ROLE_ON_PRIMARY), sound_on_mute);
 }

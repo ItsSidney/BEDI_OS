@@ -41,6 +41,7 @@ struct mbuf* m_getcl(int type) {
         kfree(m);
         return NULL;
     }
+    memset(cluster, 0, MCLBYTES);
     
     m->m_flags |= M_EXT;
     m->m_ext.ext_buf = cluster;

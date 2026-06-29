@@ -8,6 +8,7 @@
 #include "kernel/mem/kheap.h"
 #include "kernel/lib/stdio.h"
 #include "kernel/task/task.h"
+#include "kernel/time/timer.h"
 #include <string.h>
 extern void serial_puts(const char* s);
 
@@ -77,8 +78,8 @@ void tcp_input(struct mbuf* m, int off) {
     struct tcphdr* th = (struct tcphdr*)m->m_data;
 
     static int rx_pkt_count = 0;
+    rx_pkt_count++;
     if ((th->th_flags & TH_RST) || (th->th_flags & TH_FIN)) {
-        rx_pkt_count++;
         char buf[48];
         int n = 0;
         buf[n++] = 'T'; buf[n++] = 'C'; buf[n++] = 'P'; buf[n++] = ':'; buf[n++] = ' ';
@@ -113,13 +114,9 @@ void tcp_input(struct mbuf* m, int off) {
     /* Simplified State Machine */
     if ((th->th_flags & TH_SYN) && (th->th_flags & TH_ACK)) {
         if (so->so_state == TCPS_SYN_SENT) {
-            char buf[96];
-            snprintf(buf, sizeof(buf),
-                "  TCP: SYN-ACK recv seq=%u ack=%u\n",
-                (unsigned)ntohl(th->th_seq), (unsigned)ntohl(th->th_ack));
-            serial_puts(buf);
             so->so_ack = ntohl(th->th_seq) + 1;
             so->so_seq = ntohl(th->th_ack);
+            so->so_una = so->so_seq;
             so->so_state = TCPS_ESTABLISHED;
             tcp_send_packet(so, TH_ACK, NULL, 0);
             char buf2[96];
@@ -133,9 +130,30 @@ void tcp_input(struct mbuf* m, int off) {
         }
     }
     
+    /* Track remote ACK of our data */
+    uint32_t rcv_ack = ntohl(th->th_ack);
+    if (rcv_ack > so->so_una) {
+        so->so_una = rcv_ack;
+    }
+
     /* Handle data */
     int data_len = ntohs(ip->ip_len) - (ip->ip_hl << 2) - (th->th_off << 2);
     if (data_len > 0) {
+        /* Reject data received before handshake completes (echoed-by-SLIRP guard) */
+        if (so->so_state != TCPS_ESTABLISHED) {
+            tcp_send_packet(so, TH_ACK, NULL, 0);
+            m_freem(m);
+            return;
+        }
+
+        /* Reject data that does not match expected sequence number
+           (this prevents SLIRP-echoed segments from corrupting the buffer) */
+        if (so->so_ack != 0 && ntohl(th->th_seq) != so->so_ack) {
+            tcp_send_packet(so, TH_ACK, NULL, 0);
+            m_freem(m);
+            return;
+        }
+
         /* Update ACK */
         so->so_ack = ntohl(th->th_seq) + data_len;
         
@@ -176,6 +194,7 @@ int sys_socket(int domain, int type, int protocol) {
             so->so_rcv_buf = kmalloc(65536);
             so->so_rcv_len = 0;
             so->so_closed = 0;
+            so->so_una = 0;
             sockets[i] = so;
             return i;
         }
@@ -203,6 +222,7 @@ int sys_connect(int s, const struct sockaddr* name, int namelen) {
     /* Wait for SYN-ACK with retransmit every 3s */
     int timeout = 500;
     int syn_retry = 8;
+    uint32_t orig_seq = so->so_seq;
     while (so->so_state != TCPS_ESTABLISHED && timeout > 0) {
         extern void net_poll();
         net_poll();
@@ -210,7 +230,7 @@ int sys_connect(int s, const struct sockaddr* name, int namelen) {
         timeout--;
         if (timeout % 60 == 0 && syn_retry > 0) {
             syn_retry--;
-            so->so_seq = 1000; /* re-use original seq on retransmit */
+            so->so_seq = orig_seq;
             tcp_send_packet(so, TH_SYN, NULL, 0);
         }
     }
@@ -225,18 +245,29 @@ int sys_connect(int s, const struct sockaddr* name, int namelen) {
 
 int sys_send(int s, const void* msg, int len, int flags) {
     if (s < 0 || s >= MAX_SOCKETS || sockets[s] == NULL) {
-//        print_string("  TCP: sys_send invalid socket or null\n");
         return -1;
     }
     struct socket* so = sockets[s];
+    uint32_t target_seq = so->so_seq + len;
 
-    /* Print first 16 bytes */
-    int res = tcp_send_packet(so, TH_ACK | TH_PUSH, msg, len);
-    if (res == 0) {
-        so->so_seq += len;
-        return len;
+    int timeout = 300; // ~15s max
+    while (timeout > 0) {
+        extern void net_poll();
+        net_poll();
+        sleep_task(50);
+        timeout--;
+
+        if (so->so_una >= target_seq) {
+            so->so_seq = target_seq;
+            return len;
+        }
+
+        // Retransmit every ~3s
+        if (timeout % 60 == 0) {
+            tcp_send_packet(so, TH_ACK | TH_PUSH, msg, len);
+        }
     }
-    
+
     return -1;
 }
 
@@ -295,7 +326,6 @@ int sys_ping(uint32_t ip_addr) {
     struct mbuf* m = m_getcl(MT_DATA);
     if (!m) return -1;
 
-    /* Reserve space for headers */
     m->m_data += 100;
 
     struct icmphdr* icp = (struct icmphdr*)m->m_data;
@@ -306,11 +336,9 @@ int sys_ping(uint32_t ip_addr) {
     icp->icmp_seq = htons(1);
 
     m->m_len = sizeof(struct icmphdr);
-    /* Calculate ICMP checksum */
     extern uint16_t icmp_checksum(void* vdata, size_t length);
     icp->icmp_cksum = icmp_checksum(icp, m->m_len);
 
-    /* Prepend IP header */
     m->m_data -= sizeof(struct ip);
     m->m_len += sizeof(struct ip);
     struct ip* ip = (struct ip*)m->m_data;
@@ -323,11 +351,22 @@ int sys_ping(uint32_t ip_addr) {
     ip->ip_src.s_addr = ifp->if_ip;
     ip->ip_dst.s_addr = ip_addr;
 
-//    print_string("  Ping: Sending Echo Request to ");
-    char buf[16];
-    itoa(ntohl(ip_addr), buf);
-//    print_string(buf);
-//    print_string("\n");
+    if (ip_output(m, ifp) != 0) return -1;
 
-    return ip_output(m, ifp);
+    uint32_t t0 = timer_get_ms();
+    uint32_t ping_id = 0x1234;
+    uint16_t ping_seq = 1;
+    while (timer_get_ms() - t0 < 2000) {
+        extern void net_poll(void);
+        net_poll();
+        uint32_t reply_src;
+        uint16_t reply_id, reply_seq;
+        if (icmp_get_echo_reply(&reply_src, &reply_id, &reply_seq) == 0) {
+            if (reply_src == ip_addr && reply_id == htons(ping_id) && reply_seq == htons(ping_seq)) {
+                return 0;
+            }
+        }
+        sleep_task(10);
+    }
+    return -1;
 }

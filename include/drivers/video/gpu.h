@@ -73,9 +73,6 @@ typedef struct { float x, y, z; } vec3_t;
 typedef struct { float m[4][4]; } mat4_t;
 typedef struct { vec3_t p[3]; uint32_t color; } triangle_t;
 
-void gfx_3d_init(void);
-void gfx_3d_render_teacup(int x, int y, int w, int h, float angle_x, float angle_y);
-
 // API
 void gpu_init(void);
 gpu_device_t* gpu_get_primary(void);

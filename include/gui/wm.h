@@ -24,6 +24,7 @@ typedef void (*wm_render_cb)(int id, int x, int y, int w, int h, int vx, int vy)
 typedef void (*wm_key_cb)(int id, char key);
 typedef void (*wm_click_cb)(int id, int btn_id);
 typedef void (*wm_resize_cb)(int id, int w, int h);
+typedef void (*wm_mouse_cb)(int id, int mx, int my, int mb);
 
 typedef struct {
     int id;
@@ -49,6 +50,7 @@ typedef struct {
     wm_render_cb on_render;
     wm_key_cb on_key;
     wm_resize_cb on_resize;
+    wm_mouse_cb on_mouse;
     
     // Button system (reuse ui_button_t concept)
     int button_count;
@@ -87,6 +89,9 @@ void wm_clear_buttons(int win_id);
 // Set button active state
 void wm_set_button_active(int win_id, int btn_id, int active);
 
+// Refresh all window button colors from current theme
+void wm_refresh_all_button_theme(void);
+
 // Get focused window ID (-1 if none)
 int wm_get_focused(void);
 
@@ -104,6 +109,9 @@ int wm_tick(void);
 void wm_set_app_data(int win_id, void* data);
 void* wm_get_app_data(int win_id);
 
+// Set mouse handler for a window
+void wm_set_mouse_handler(int win_id, wm_mouse_cb cb);
+
 // Run a single-window app (blocking, for backward compat)
 void wm_run_single(int win_id);
 
@@ -115,6 +123,7 @@ void wm_bring_to_front(int win_id);
 
 // Virtual desktop support
 int wm_get_current_desktop(void);
+int wm_get_previous_desktop(void);
 void wm_set_current_desktop(int d);
 
 #endif

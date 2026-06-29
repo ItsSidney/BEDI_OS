@@ -8,6 +8,22 @@
  * ICMP implementation for BEDI OS.
  */
 
+static int gr_last_reply_valid;
+static uint32_t gr_last_reply_src;
+static uint16_t gr_last_reply_id;
+static uint16_t gr_last_reply_seq;
+
+int icmp_get_echo_reply(uint32_t* src, uint16_t* id, uint16_t* seq) {
+    if (gr_last_reply_valid) {
+        *src = gr_last_reply_src;
+        *id = gr_last_reply_id;
+        *seq = gr_last_reply_seq;
+        gr_last_reply_valid = 0;
+        return 0;
+    }
+    return -1;
+}
+
 uint16_t icmp_checksum(void* vdata, size_t length) {
     uint8_t* data = (uint8_t*)vdata;
     uint32_t sum = 0;
@@ -47,11 +63,10 @@ void icmp_input(struct mbuf* m, int off) {
         
         ip_output(m, NULL);
     } else if (icp->icmp_type == ICMP_ECHOREPLY) {
-//        print_string("  Reply received from ");
-        char buf[16];
-        itoa(ntohl(ip->ip_src.s_addr), buf);
-//        print_string(buf);
-//        print_string("!\n");
+        gr_last_reply_src = ip->ip_src.s_addr;
+        gr_last_reply_id = icp->icmp_id;
+        gr_last_reply_seq = icp->icmp_seq;
+        gr_last_reply_valid = 1;
         m_freem(m);
     } else {
         m_freem(m);

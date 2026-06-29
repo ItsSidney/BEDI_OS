@@ -61,7 +61,6 @@ function build() {
         exit 1
     fi
     echo "[BUILD] Rust library ready: $RUST_LIB"
-
     # 2. Compile C files
     echo "[BUILD] Compiling C source files..."
     C_SOURCES=$(find src -name "*.c" -not -path "*/rust/*")
@@ -71,7 +70,6 @@ function build() {
         mkdir -p "$(dirname "$obj")"
         
         echo "  CC $src -> $obj"
-        # Enable optimizations for networking to speed up math
         if [[ "$src" == *"net"* ]]; then
             $CC $CFLAGS -O0 -mno-sse -mno-sse2 $src -o $obj
         else
@@ -142,8 +140,8 @@ function run() {
         exit 1
     fi
 
-    QEMU_FLAGS="-cdrom $ISO_NAME -m 2G -smp 4 -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -serial stdio \
-                -net nic,model=e1000 -net user"
+    QEMU_FLAGS="-cdrom $ISO_NAME -m 4G -smp 4 -machine q35 -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -serial stdio \
+                -net nic,model=e1000 -net user -rtc base=localtime"
     
     if [ -e /dev/kvm ]; then
         QEMU_FLAGS="$QEMU_FLAGS -cpu host -enable-kvm"
@@ -176,7 +174,7 @@ case "$1" in
         $QEMU $QFLAGS &
         QPID=$!
         echo "[RUN] PID $QPID — logging..."
-        sleep 90
+        sleep 5
         kill $QPID 2>/dev/null; wait $QPID 2>/dev/null
         echo "[RUN] Log saved to bedi_qemu.log (lines: $(wc -l < bedi_qemu.log))"
         ;;

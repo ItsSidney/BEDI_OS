@@ -29,21 +29,12 @@ static uint64_t get_pci_bar_addr(pci_device_t* pci, int bar_idx) {
 }
 
 void gpu_init(void) {
-    serial_puts("[GPU] Initializing...\n");
     int pci_count = pci_get_device_count();
-    serial_puts("[GPU] PCI devices: ");
-    char buf[32]; itoa(pci_count, buf); serial_puts(buf); serial_puts("\n");
+    char buf[32];
     for (int i = 0; i < pci_count; i++) {
         pci_device_t* pci = pci_get_device(i);
-        serial_puts("[GPU] PCI device: "); 
-        itoa(pci->vendor_id, buf); serial_puts(" vendor="); serial_puts(buf);
-        itoa(pci->device_id, buf); serial_puts(" device="); serial_puts(buf);
-        itoa(pci->class_id, buf); serial_puts(" class="); serial_puts(buf);
-        serial_puts("\n");
         
-        // 1. Check for Intel GPU
         if (pci->vendor_id == 0x8086 && pci->class_id == 0x03) {
-            serial_puts("[GPU] Found Intel GPU\n");
             
             primary_gpu.vendor_id = pci->vendor_id;
             primary_gpu.device_id = pci->device_id;
@@ -51,14 +42,10 @@ void gpu_init(void) {
             uint64_t mmio_phys = get_pci_bar_addr(pci, 0);
             uint64_t fb_phys = get_pci_bar_addr(pci, 2);
             
-            primary_gpu.mmio_size = 16 * 1024 * 1024; // Gen9 default
+            primary_gpu.mmio_size = 16 * 1024 * 1024;
             
-            serial_puts("[GPU] Mapping MMIO...\n");
-            // Map MMIO and Aperture
             vmm_map_range(GPU_MMIO_VIRT, mmio_phys, primary_gpu.mmio_size, VMM_WRITE | VMM_PCD);
-            serial_puts("[GPU] Mapping FB...\n");
             vmm_map_range(GPU_FB_VIRT, fb_phys, 256 * 1024 * 1024, VMM_WRITE | VMM_PCD);
-            serial_puts("[GPU] Mapped BARs\n");
 
             primary_gpu.mmio_base = GPU_MMIO_VIRT;
             primary_gpu.fb_base = GPU_FB_VIRT;
@@ -91,9 +78,7 @@ void gpu_init(void) {
             }
         }
 
-        // 2. Check for VirtIO GPU (QEMU)
         if (pci->vendor_id == 0x1AF4 && (pci->device_id == 0x1010 || pci->device_id == 0x1050 || pci->device_id == 0x1009)) {
-            serial_puts("[GPU] Found VirtIO GPU\n");
             primary_gpu.vendor_id = pci->vendor_id;
             primary_gpu.device_id = pci->device_id;
 
@@ -138,6 +123,29 @@ void gpu_init(void) {
             primary_gpu.driver = NULL;
 
             const char* name = "Standard VGA (Compatible Mode)";
+            int k = 0;
+            while (name[k]) { primary_gpu.name[k] = name[k]; k++; }
+            primary_gpu.name[k] = 0;
+
+            extern uint32_t get_fb_width();
+            extern uint32_t get_fb_height();
+            extern uint32_t gfx_get_stride();
+            primary_gpu.width = get_fb_width();
+            primary_gpu.height = get_fb_height();
+            primary_gpu.pitch = gfx_get_stride() * 4;
+
+            has_gpu = 1;
+            return;
+        }
+
+        // 4. Generic fallback for any display controller (Boxes, VMware, etc.)
+        if (pci->class_id == 0x03 && !has_gpu) {
+            primary_gpu.vendor_id = pci->vendor_id;
+            primary_gpu.device_id = pci->device_id;
+            primary_gpu.initialized = 1;
+            primary_gpu.driver = NULL;
+
+            const char* name = "Generic Virtual Display Controller (Compatible Mode)";
             int k = 0;
             while (name[k]) { primary_gpu.name[k] = name[k]; k++; }
             primary_gpu.name[k] = 0;

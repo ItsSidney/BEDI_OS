@@ -37,6 +37,6 @@ struct ether_arp {
 } __attribute__((packed));
 
 void arp_input(struct mbuf* m);
-void arp_resolve(struct ifnet* ifp, struct mbuf* m, const struct in_addr* dst, uint8_t* dest_enaddr);
+int arp_resolve(struct ifnet* ifp, struct mbuf* m, const struct in_addr* dst, uint8_t* dest_enaddr);
 
 #endif /* _KERNEL_NET_IF_ARP_H */

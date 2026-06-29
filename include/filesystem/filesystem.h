@@ -53,9 +53,8 @@ int fs_get_current_dir();
 int fs_set_flags(const char* filename, uint8_t flags);
 
 // New expanded API
-int fs_get_home_dir();
-int fs_get_trash_dir();
-int fs_get_desktop_dir();
+int fs_get_home_dir(void);
+int fs_get_trash_dir(void);
 int fs_trash_file(const char* filename);
 int fs_empty_trash();
 int fs_restore_from_trash(const char* filename);

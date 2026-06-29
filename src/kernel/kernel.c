@@ -73,47 +73,22 @@ static volatile struct limine_framebuffer_request framebuffer_request = {
 };
 
 void draw_early_progress(int step, uint32_t color) {
-    (void)color;
-    const char* tag = 0;
-    const char* msg = 0;
-    uint32_t tag_color = 0x58A6FF;
-    switch (step) {
-        case 1:  tag = "BEDI"; msg = "_start_c starting"; tag_color = 0x58A6FF; break;
-        case 2:  tag = "BEDI"; msg = "IDT initialized"; tag_color = 0x58A6FF; break;
-        case 3:  tag = "BEDI"; msg = "FPU initialized"; tag_color = 0x58A6FF; break;
-        case 4:  tag = "BEDI"; msg = "boot modules loaded"; tag_color = 0x58A6FF; break;
-        case 5:  tag = "BEDI"; msg = "framebuffer ready"; tag_color = 0x58A6FF; break;
-        case 6:  tag = "BEDI"; msg = "HHDM configured"; tag_color = 0x58A6FF; break;
-        case 7:  tag = "BEDI"; msg = "memory map read"; tag_color = 0x58A6FF; break;
-        case 8:  tag = "BEDI"; msg = "kmain starting..."; tag_color = 0x3FB950; break;
-        case 9:  tag = "HEAP"; msg = "kernel heap initialized"; tag_color = 0xF0883E; break;
-        case 10: tag = "VMM"; msg = "Virtual Memory Manager initialized"; tag_color = 0x3FB950; break;
-        case 11: tag = "TIMER"; msg = "PIT timer set to 1000 Hz"; tag_color = 0xF0883E; break;
-        case 12: tag = "TASK"; msg = "multitasking enabled"; tag_color = 0xBC8CFF; break;
-        case 14: tag = "SEC"; msg = "security monitor initialized"; tag_color = 0xF85149; break;
-        case 15: tag = "RUST"; msg = "Rust kernel module loaded [v0.2.0]"; tag_color = 0xBC8CFF; break;
-        case 16: tag = "AUDIO"; msg = "audio subsystem initialized"; tag_color = 0x39D2C0; break;
-        case 17: tag = "FS"; msg = "filesystem abstraction ready"; tag_color = 0xE3B341; break;
-        case 18: tag = "PCI"; msg = "PCI bus enumerated"; tag_color = 0x58A6FF; break;
-        case 19: tag = "ACPI"; msg = "ACPI tables initialized"; tag_color = 0x39D2C0; break;
-        case 20: tag = "GPU"; msg = "GPU initialization complete"; tag_color = 0x3FB950; break;
-        case 21: tag = "NET"; msg = "networking stack initialized"; tag_color = 0x39D2C0; break;
-        case 22: tag = "MOUSE"; msg = "PS/2 mouse driver ready"; tag_color = 0xE3B341; break;
-        case 23: tag = "VFS"; msg = "Virtual Filesystem initialized"; tag_color = 0xF0883E; break;
-        case 24: tag = "IDE"; msg = "IDE storage initialized"; tag_color = 0x58A6FF; break;
-        case 25: tag = "VFS"; msg = "root filesystem mounted"; tag_color = 0x3FB950; break;
-        case 31: tag = "BEDI"; msg = "starting GUI..."; tag_color = 0x3FB950; break;
-        default:
-            if (step >= 26 && step <= 30) { tag = "STORAGE"; msg = "scanning storage device..."; tag_color = 0xF0883E; }
-            else if (step >= 32) { tag = "PCI"; msg = "probing PCI bus..."; tag_color = 0x58A6FF; }
-            else { tag = "BEDI"; msg = "initializing..."; tag_color = 0x8B949E; }
-            break;
-    }
-    if (tag && msg) {
-        extern void boot_log_add(const char*, const char*, uint32_t, uint32_t);
-        extern void draw_splash_screen(int);
-        boot_log_add(tag, msg, tag_color, 0xE8EAED);
-        draw_splash_screen(step);
+    extern void boot_log_add(const char*, const char*, uint32_t, uint32_t);
+    extern void draw_boot_log(void);
+    char buf[16];
+    const char* msgs[] = {
+        "Serial", "IDT", "FPU", "Modules", "Framebuffer",
+        "HHDM", "Memmap", "kmain", "Heap", "VMM",
+        "Timer", "Tasking", "Security", "Rust", "Audio",
+        "Filesystem", "PCI", "ACPI", "GPU", "Network",
+        "Mouse", "VFS", "IDE", "Mount", "GUI"
+    };
+    const char* msg = (step > 0 && step <= (int)(sizeof(msgs)/sizeof(msgs[0]))) ? msgs[step - 1] : "Init";
+    boot_log_add("INIT", msg, color, 0xFFFFFF);
+    static int boot_draw_counter = 0;
+    if (++boot_draw_counter >= 3) {
+        boot_draw_counter = 0;
+        draw_boot_log();
     }
 }
 
@@ -198,14 +173,15 @@ extern void exit_task(int code);
 #include <string.h>
 
 extern void init_fpu();
+extern void net_init();
 
 void _start_c(void) {
     serial_init();
-//    serial_puts("[BEDI] _start_c starting\n");
 
     if (framebuffer_request.response != 0 && framebuffer_request.response->framebuffer_count >= 1) {
-//        serial_puts("[BEDI] Initializing framebuffer\n");
         struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
+        uint64_t fb_addr_virt = (uint64_t)fb->address;
+        boot_log_add_hex("FB", "Framebuffer base", 0x58A6FF, 0xE8EAED, fb_addr_virt, 0x3FB950);
         init_framebuffer(
             (uint32_t*)fb->address,
             fb->width,
@@ -216,21 +192,23 @@ void _start_c(void) {
             fb->green_mask_shift,
             fb->blue_mask_shift
         );
-//        serial_puts("[BEDI] Framebuffer initialized\n");
+        boot_log_add("FB", "Mode initialized", 0x58A6FF, 0xE8EAED);
+        char resbuf[32];
+        itoa(fb->width, resbuf); boot_log_add("FB", resbuf, 0x58A6FF, 0xE8EAED);
+        itoa(fb->height, resbuf); boot_log_add("FB", resbuf, 0x58A6FF, 0xE8EAED);
+    } else {
+        boot_log_add("FB", "No framebuffer", 0xFF0000, 0xF85149);
+        hcf();
     }
-
-//    serial_puts("[BEDI] Calling draw_early_progress\n");
-    draw_early_progress(1, 0x00FF00); // 1: Serial
-//    serial_puts("[BEDI] draw_early_progress returned\n");
+    draw_early_progress(1, 0x00FF00);
 
     init_idt();
-    draw_early_progress(2, 0x00FF00); // 2: IDT
+    draw_early_progress(2, 0x00FF00);
 
     init_fpu();
-    draw_early_progress(3, 0x00FF00); // 3: FPU
+    draw_early_progress(3, 0x00FF00);
 
     if (limine_base_revision[2] != 0) {
-//        serial_puts("[BEDI] FATAL: base revision\n");
         draw_early_progress(1, 0xFF0000); 
         hcf();
     }
@@ -240,119 +218,154 @@ void _start_c(void) {
             struct limine_file *f = module_request.response->modules[i];
             asset_data_arr[i] = f->address;
             asset_size_arr[i] = f->size;
+            boot_log_add_hex("MOD", "Module loaded", 0xBC8CFF, 0xE8EAED, (uint64_t)f->address, 0x3FB950);
+            char szbuf[20];
+            itoa(f->size, szbuf);
+            boot_log_add("MOD", szbuf, 0xBC8CFF, 0xE8EAED);
         }
+    } else {
+        boot_log_add("MOD", "No modules", 0xF0883E, 0xE8EAED);
     }
-    draw_early_progress(4, 0x00FF00); // 4: Modules
-
-    draw_early_progress(5, 0x00FF00); // 5: Framebuffer
+    draw_early_progress(4, 0x00FF00);
+    draw_early_progress(5, 0x00FF00);
 
     if (hhdm_request.response == 0) {
-//        serial_puts("[BEDI] FATAL: no HHDM\n");
-        draw_early_progress(3, 0xFF0000); 
-        hcf();
-    }
-    hhdm_offset = hhdm_request.response->offset;
-    draw_early_progress(6, 0x00FF00); // 6: HHDM
-
-    if (memmap_request.response == 0) {
-//        serial_puts("[BEDI] FATAL: no memmap\n");
         draw_early_progress(4, 0xFF0000); 
         hcf();
     }
-    draw_early_progress(7, 0x00FF00); // 7: Memmap
+    hhdm_offset = hhdm_request.response->offset;
+    boot_log_add_hex("HHDM", "Higher-half direct map", 0x39D2C0, 0xE8EAED, hhdm_offset, 0x3FB950);
+    draw_early_progress(6, 0x00FF00);
+
+    if (memmap_request.response == 0) {
+        draw_early_progress(5, 0xFF0000); 
+        hcf();
+    }
+    // Dump memory map entries
+    uint64_t total_mem = 0;
+    for (uint64_t i = 0; i < memmap_request.response->entry_count && i < 16; i++) {
+        struct limine_memmap_entry *e = memmap_request.response->entries[i];
+        total_mem += e->length;
+        boot_log_add_hex("MEM", "Region", 0x39D2C0, 0xE8EAED, e->base, 0xF0F6FC);
+        boot_log_add_hex("MEM", "  length", 0x39D2C0, 0xE8EAED, e->length, 0xF0F6FC);
+        char typebuf[16];
+        itoa(e->type, typebuf);
+        boot_log_add("MEM", "  type", 0x39D2C0, 0xE8EAED);
+    }
+    char totalbuf[32];
+    itoa(total_mem, totalbuf);
+    boot_log_add("MEM", "Total usable", 0x39D2C0, 0xE8EAED);
+    draw_early_progress(7, 0x00FF00);
 
     kmain();
     hcf();
 }
 
 void kmain() {
-//    serial_puts("[BEDI] kmain starting\n");
-    draw_early_progress(8, 0x00FF00); // 8: kmain
+    draw_early_progress(8, 0x00FF00); // kmain
 
     kheap_init();
-    draw_early_progress(9, 0x00FF00); // 9: Heap
+    boot_log_add_hex("HEAP", "Kernel heap size", 0x39D2C0, 0xE8EAED, (uint64_t)KHEAP_SIZE, 0x3FB950);
+    draw_early_progress(9, 0x00FF00); // Heap
     
     log_init();
     klog("[BEDI] Kernel log started\n");
 
     vmm_init();
-    draw_early_progress(10, 0x00FF00); // 10: VMM
+    {
+        uint64_t cr3_val;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3_val));
+        boot_log_add_hex("VMM", "CR3 (PML4 phys)", 0x39D2C0, 0xE8EAED, cr3_val, 0x3FB950);
+    }
+    draw_early_progress(10, 0x00FF00); // VMM
     
     init_timer(1000);
-    draw_early_progress(11, 0x00FF00); // 11: Timer
+    boot_log_add_hex("TIMR", "PIT frequency Hz", 0x39D2C0, 0xE8EAED, 1000ULL, 0x3FB950);
+    draw_early_progress(11, 0x00FF00); // Timer
     
     init_tasking();
-    draw_early_progress(12, 0x00FF00); // 12: Tasking
-    
-    // init_syscall_gs_base();
-    // klog("Initializing TSS and GS base...\n");
-    // init_syscall_gs_base();
-    // klog("TSS and GS base done\n");
-    // draw_early_progress(13, 0x00FF00); // 13: Syscall/GS
+    boot_log_add("TSK", "Task subsystem online", 0x39D2C0, 0xE8EAED);
+    draw_early_progress(12, 0x00FF00); // Tasking
     
     init_security();
-    draw_early_progress(14, 0x00FF00); // 14: Security
+    boot_log_add("SEC", "users initialized (root, guest)", 0xF85149, 0xE8EAED);
+    draw_early_progress(13, 0x00FF00); // Security
 
     rust_kernel_init();
-    draw_early_progress(15, 0x00FF00); // 14: Rust
+    draw_early_progress(14, 0x00FF00); // Rust
 
     audio_init();
-    draw_early_progress(16, 0x00FF00); // 15: Audio
+    boot_log_add("SND", "Audio pipeline ready", 0xBC8CFF, 0xE8EAED);
+    draw_early_progress(15, 0x00FF00); // Audio
 
     init_filesystem();
-    draw_early_progress(17, 0x00FF00); // 16: Filesystem
+    boot_log_add("FS", "Filesystem core ready", 0x39D2C0, 0xE8EAED);
+    draw_early_progress(16, 0x00FF00); // Filesystem
 
     pci_init();
-    draw_early_progress(18, 0x00FF00); // 17: PCI
+    draw_early_progress(17, 0x00FF00); // PCI
     
-    // ACPI (non-fatal if missing - graceful fallback)
     if (acpi_init() == 0) {
-        draw_early_progress(19, 0x00FF00); // 18: ACPI
+        boot_log_add_hex("ACPI", "RSDP at", 0x58A6FF, 0xE8EAED, (uint64_t)rsdp_request.response->address, 0x3FB950);
+        draw_early_progress(18, 0x00FF00); // ACPI
     } else {
-        draw_early_progress(19, 0xF0883E); // ACPI - degraded mode (orange)
+        boot_log_add("ACPI", "No ACPI tables (degraded)", 0xF0883E, 0xE8EAED);
+        draw_early_progress(18, 0xF0883E);
     }
     
     gpu_init();
-    draw_early_progress(20, 0x00FF00); // 19: GPU
+    boot_log_add("GPU", "Graphics pipeline initialized", 0x58A6FF, 0xE8EAED);
+    draw_early_progress(19, 0x00FF00); // GPU
 
     __asm__ volatile("sti");
 
-    extern void net_init();
     net_init();
-    draw_early_progress(21, 0x00FF00); // 20: Network
+    draw_early_progress(20, 0x00FF00); // Network
     
     init_mouse();
     mouse_set_bounds(get_fb_width(), get_fb_height());
-    draw_early_progress(22, 0x00FF00); // 21: Mouse
+    boot_log_add("IN", "HID mouse initialized", 0x58A6FF, 0xE8EAED);
+    draw_early_progress(21, 0x00FF00); // Mouse
     
     vfs_init();
-    draw_early_progress(23, 0x00FF00); // 22: VFS
+    draw_early_progress(22, 0x00FF00); // VFS
     
     ide_init();
-    draw_early_progress(24, 0x00FF00); // 23: IDE
+    boot_log_add_hex("IDE", "Primary bus I/O base", 0x58A6FF, 0xE8EAED, (uint64_t)0x1F0, 0x3FB950);
+    draw_early_progress(23, 0x00FF00); // IDE
     
+    serial_puts("[KERNEL] mounting ramfs...\n");
     vfs_mount("/", ramfs_init());
-    draw_early_progress(25, 0x00FF00); // 24: Mount
+    draw_early_progress(24, 0x00FF00); // Mount
     uint32_t dev_count = storage_get_device_count();
     for (uint32_t i = 0; i < dev_count && i < 6; i++) {
-        draw_early_progress(26 + i, 0x00FF00);
+        boot_log_add_hex("BLK", "Storage device found", 0xBC8CFF, 0xE8EAED, (uint64_t)i, 0x3FB950);
+        draw_early_progress(25 + i, 0x00FF00);
         block_device_t* dev = storage_get_device(i);
+        boot_log_add_hex("BLK", "  sector count", 0xBC8CFF, 0xE8EAED, dev->size_sectors, 0xF0F6FC);
         vfs_node_t* partition = fat32_init(dev, 0);
         if (partition) {
             vfs_mount(dev->name, partition);
+            boot_log_add("BLK", "  partition mounted", 0xBC8CFF, 0x3FB950);
         }
     }
+    serial_puts("[KERNEL] creating background worker...\n");
     create_task(background_worker, "Worker");
+    serial_puts("[KERNEL] background worker created\n");
     
-//    serial_puts("[BEDI] Starting GUI\n");
     draw_early_progress(31, 0x00FF00); // GUI
     
     extern void set_splash_mode(bool mode);
     set_splash_mode(false);
-    
+    extern void clear_screen(void);
+    clear_screen();
+    extern void draw_premium_wallpaper(void);
+    draw_premium_wallpaper();
+    swap_buffers();
+
+    serial_puts("[KERNEL] Starting GUI...\n");
     start_gui();    // Boot to GUI
 
-    // If GUI exits for some reason, just halt
     while(1) {
         __asm__ volatile("hlt");
     }

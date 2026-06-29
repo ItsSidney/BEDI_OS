@@ -2,6 +2,7 @@
 #include "drivers/video/gpu.h"
 #include "gui/font.h"
 #include "kernel/log.h"
+#include <gfx/splash_bmp.h>
 #include <string.h>
 
 
@@ -80,13 +81,17 @@ extern void gui_terminal_backspace(void);
 void set_splash_mode(bool mode) { splash_mode = mode; }
 
 // ============ BOOT LOG ============
-#define BOOT_LOG_MAX 80
+#define BOOT_LOG_MAX 128
+#define BOOT_HEX_MAX 24  // max hex chars to append
 
 typedef struct {
     char tag[16];
     char msg[72];
     uint32_t tag_color;
     uint32_t msg_color;
+    int has_hex;
+    uint64_t hex_value;
+    int hex_color;          // -1 = use msg_color, else override
 } boot_entry_t;
 
 static boot_entry_t boot_log[BOOT_LOG_MAX];
@@ -113,24 +118,61 @@ static void boot_draw_str(int x, int y, const char* str, uint32_t fg, uint32_t b
     }
 }
 
-void boot_log_add(const char* tag, const char* msg, uint32_t tag_color, uint32_t msg_color) {
-    if (boot_log_count < BOOT_LOG_MAX) {
-        int i = 0;
-        while (tag[i] && i < 15) { boot_log[boot_log_count].tag[i] = tag[i]; i++; }
-        boot_log[boot_log_count].tag[i] = 0;
-        i = 0;
-        while (msg[i] && i < 71) { boot_log[boot_log_count].msg[i] = msg[i]; i++; }
-        boot_log[boot_log_count].msg[i] = 0;
-        boot_log[boot_log_count].tag_color = tag_color;
-        boot_log[boot_log_count].msg_color = msg_color;
-        boot_log_count++;
+static int boot_strlen(const char* str) {
+    int len = 0;
+    while (str[len]) len++;
+    return len;
+}
+
+static void boot_draw_hex(uint64_t value, int x, int y, uint32_t fg, uint32_t bg) {
+    char buf[BOOT_HEX_MAX + 4];
+    int len = 0;
+    buf[len++] = '0';
+    buf[len++] = 'x';
+    // Print 16 hex digits
+    for (int i = 15; i >= 0; i--) {
+        int digit = (value >> (i * 4)) & 0xF;
+        buf[len++] = (char)(digit < 10 ? '0' + digit : 'A' + digit - 10);
     }
+    buf[len++] = 0;
+    boot_draw_str(x, y, buf, fg, bg);
+}
+
+void boot_log_add(const char* tag, const char* msg, uint32_t tag_color, uint32_t msg_color) {
+    if (boot_log_count >= BOOT_LOG_MAX) return;
+    int i = 0;
+    while (tag[i] && i < 15) { boot_log[boot_log_count].tag[i] = tag[i]; i++; }
+    boot_log[boot_log_count].tag[i] = 0;
+    i = 0;
+    while (msg[i] && i < 71) { boot_log[boot_log_count].msg[i] = msg[i]; i++; }
+    boot_log[boot_log_count].msg[i] = 0;
+    boot_log[boot_log_count].tag_color = tag_color;
+    boot_log[boot_log_count].msg_color = msg_color;
+    boot_log[boot_log_count].has_hex = 0;
+    boot_log[boot_log_count].hex_value = 0;
+    boot_log[boot_log_count].hex_color = -1;
+    boot_log_count++;
+}
+
+void boot_log_add_hex(const char* tag, const char* msg, uint32_t tag_color, uint32_t msg_color,
+                       uint64_t hex_value, int hex_color_override) {
+    if (boot_log_count >= BOOT_LOG_MAX) return;
+    int i = 0;
+    while (tag[i] && i < 15) { boot_log[boot_log_count].tag[i] = tag[i]; i++; }
+    boot_log[boot_log_count].tag[i] = 0;
+    i = 0;
+    while (msg[i] && i < 71) { boot_log[boot_log_count].msg[i] = msg[i]; i++; }
+    boot_log[boot_log_count].msg[i] = 0;
+    boot_log[boot_log_count].tag_color = tag_color;
+    boot_log[boot_log_count].msg_color = msg_color;
+    boot_log[boot_log_count].has_hex = 1;
+    boot_log[boot_log_count].hex_value = hex_value;
+    boot_log[boot_log_count].hex_color = hex_color_override;
+    boot_log_count++;
 }
 
 void draw_boot_log(void) {
-    int step = boot_log_count;
-    if (step > 31) step = 31;
-    draw_splash_screen(step);
+    draw_splash_screen(boot_log_count);
 }
 
 // ── Black & white splash screen ─────────────────────────────────────────
@@ -171,99 +213,56 @@ static void bw_draw_icon(int x, int y, int s, const uint8_t* pat, uint32_t col) 
 }
 
 void draw_splash_screen(int step) {
+    if (!splash_mode) return;
     if (fb_width == 0 || fb_height == 0) return;
     int w = (int)fb_width, h = (int)fb_height;
     uint32_t black = rgb_to_pixel(BW_BLACK);
     uint32_t white = rgb_to_pixel(BW_WHITE);
-    uint32_t lgray = rgb_to_pixel(BW_LGRAY);
-    uint32_t mgray = rgb_to_pixel(BW_MGRAY);
-    uint32_t dgray = rgb_to_pixel(BW_DGRAY);
-    uint32_t dim   = rgb_to_pixel(BW_DIM);
 
-    for (uint32_t i = 0; i < (uint32_t)w * h; i++) back_buffer[i] = black;
+    static int banner_drawn = 0;
+    static int banner_x = 0, banner_y = 0, out_h = 0;
 
-    // ── "BEDI" wordmark ──────────────────────────────────────────────────
-    int bs = w / 42;
-    if (bs < 10) bs = 10;
-    if (bs > 24) bs = 24;
-    int lw = 6 * bs, gap = bs;
-    int logo_w = lw * 4 + gap * 3;
-    int lx = (w - logo_w) / 2;
-    int ly = h / 5 - bs;
+    if (!banner_drawn) {
+        for (uint32_t i = 0; i < (uint32_t)w * h; i++) back_buffer[i] = black;
 
-    // Drop shadow
-    bw_draw_letter(lx + bs/2, ly + bs/2, bs, BW_B, 6, dgray);
-    bw_draw_letter(lx + bs/2 + lw + gap, ly + bs/2, bs, BW_E, 6, dgray);
-    bw_draw_letter(lx + bs/2 + (lw + gap) * 2, ly + bs/2, bs, BW_D, 6, dgray);
-    bw_draw_letter(lx + bs/2 + (lw + gap) * 3, ly + bs/2, bs, BW_I, 6, dgray);
-
-    // Main white letters
-    bw_draw_letter(lx, ly, bs, BW_B, 6, white);
-    bw_draw_letter(lx + lw + gap, ly, bs, BW_E, 6, white);
-    bw_draw_letter(lx + (lw + gap) * 2, ly, bs, BW_D, 6, white);
-    bw_draw_letter(lx + (lw + gap) * 3, ly, bs, BW_I, 6, white);
-
-    // Underline
-    int ul_y = ly + 7 * bs + bs/2;
-    draw_rect(lx, ul_y, logo_w, 1, mgray);
-
-    // ── Progress bar ──────────────────────────────────────────────────────
-    int bar_w = w * 3 / 5;
-    if (bar_w > 800) bar_w = 800;
-    int bar_h = 10;
-    int bar_x = (w - bar_w) / 2;
-    int bar_y = ul_y + 40;
-    int pct = (step <= 0) ? 0 : (step >= 31) ? 100 : (step * 100) / 31;
-
-    draw_rect(bar_x, bar_y, bar_w, bar_h, dgray);
-    if (pct > 0) {
-        int fw = (bar_w * pct) / 100;
-        if (fw > bar_w) fw = bar_w;
-        draw_rect(bar_x, bar_y, fw, bar_h, white);
+        int bw = bedi_banner_w, bh = bedi_banner_h;
+        int out_w = w;
+        out_h = (bh * out_w) / bw;
+        if (out_h < 40) out_h = 40;
+        banner_x = (w - out_w) / 2;
+        banner_y = (h - out_h) / 10;
+        draw_bmp(banner_x, banner_y, bedi_banner_bmp, bedi_banner_bmp_len,
+                 back_buffer, INTERNAL_STRIDE, w, h, 0, 0, out_w, out_h);
+        banner_drawn = 1;
     }
 
-    char pct_s[8];
-    int pi = 0;
-    if (pct >= 100) pct_s[pi++] = '1';
-    if (pct >= 10)  pct_s[pi++] = '0' + (pct / 10) % 10;
-    pct_s[pi++] = '0' + pct % 10; pct_s[pi] = 0;
-    boot_draw_str(bar_x + bar_w + 12, bar_y + 1, pct_s, mgray, black);
+    int init_y = banner_y + out_h + 22;
+    int max_lines = (h - init_y - 10) / 18;
+    if (max_lines > 48) max_lines = 48;
+    if (max_lines < 1) max_lines = 1;
 
-    // ── Stage icons ───────────────────────────────────────────────────────
-    const char* slogans[] = {"CPU","MEM","KRN","SEC","HW","NET","STR","GUI"};
-    const uint8_t* spats[] = {ICON_CPU,ICON_MEM,ICON_KRN,ICON_SEC,ICON_HW,ICON_NET,ICON_STR,ICON_GUI};
-    int nst = 8;
-    int icon_s = 2;
-    int st_y = bar_y + bar_h + 30;
-    int st_sp = w / (nst + 1);
+    int count = boot_log_count;
+    if (count > max_lines) count = max_lines;
+    int start = 0;
+    if (count < max_lines) start = 0;
+    else start = count - max_lines;
 
-    for (int i = 0; i < nst; i++) {
-        int sx = st_sp * (i + 1) - 7 * icon_s / 2;
-        int on = (step > i * 4);
-        uint32_t ic = on ? white : dgray;
-        bw_draw_icon(sx, st_y, icon_s, spats[i], ic);
-        int label_x = st_sp * (i + 1) - ((int)strlen(slogans[i]) * 4);
-        boot_draw_str(label_x, st_y + 7 * icon_s + 4, slogans[i], on ? mgray : dgray, black);
+    for (int i = start; i < count; i++) {
+        int ly = init_y + (i - start) * 18;
+        if (ly + 16 > h - 4) break;
+        int tx = 20;
+        // Tag
+        boot_draw_str(tx, ly, boot_log[i].tag, white, black);
+        tx += 40;
+        // Msg
+        boot_draw_str(tx, ly, boot_log[i].msg, white, black);
+        // Hex value on the same line after msg
+        if (boot_log[i].has_hex) {
+            tx += boot_strlen(boot_log[i].msg) * 8 + 10;
+            if (tx + 20 > w - 10) tx = w - 20 * 8 - 10;
+            boot_draw_hex(boot_log[i].hex_value, tx, ly, white, black);
+        }
     }
-
-    // ── Boot messages ─────────────────────────────────────────────────────
-    int msg_y = st_y + 7 * icon_s + 24;
-    for (int row = 0; row < 4; row++) {
-        int idx = boot_log_count - 4 + row;
-        if (idx < 0 || idx >= boot_log_count) continue;
-        uint32_t tc = rgb_to_pixel(boot_log[idx].tag_color);
-        uint32_t mc = rgb_to_pixel(BW_LGRAY);
-        int xx = w / 6;
-        boot_draw_char(xx, msg_y + row * 18, '>', mgray, black);
-        boot_draw_char(xx + 12, msg_y + row * 18, ' ', mgray, black);
-        boot_draw_str(xx + 20, msg_y + row * 18, "[", mgray, black);
-        boot_draw_str(xx + 28, msg_y + row * 18, boot_log[idx].tag, tc, black);
-        xx += 28 + (int)strlen(boot_log[idx].tag) * 8;
-        boot_draw_str(xx, msg_y + row * 18, "]", mgray, black);
-        boot_draw_str(xx + 8, msg_y + row * 18, " ", mgray, black);
-        boot_draw_str(xx + 16, msg_y + row * 18, boot_log[idx].msg, mc, black);
-    }
-
 
     swap_buffers();
 }
@@ -405,3 +404,11 @@ void cache_background() {
 void restore_background() {
     for (uint32_t i = 0; i < fb_width * fb_height; i++) back_buffer[i] = bg_buffer[i];
 }
+
+int fb_draw_bmp(int x, int y, const unsigned char* data, unsigned int len) {
+    return draw_bmp(x, y, data, len, back_buffer, INTERNAL_STRIDE, (int)fb_width, (int)fb_height, 0, 0, 0, 0);
+}
+
+int fb_get_width(void) { return (int)fb_width; }
+int fb_get_height(void) { return (int)fb_height; }
+uint32_t* fb_get_back_buffer(void) { return back_buffer; }

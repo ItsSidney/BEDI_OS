@@ -134,7 +134,8 @@ void arp_input(struct mbuf* m) {
     m_freem(m);
 }
 
-void arp_resolve(struct ifnet* ifp, struct mbuf* m, const struct in_addr* dst, uint8_t* dest_enaddr) {
+int arp_resolve(struct ifnet* ifp, struct mbuf* m, const struct in_addr* dst, uint8_t* dest_enaddr) {
+    (void)dest_enaddr;
     int hit_idx = -1;
     uint8_t qemu_mac[6] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
     for (int i = 0; i < ARP_CACHE_SIZE; i++) {
@@ -166,19 +167,20 @@ void arp_resolve(struct ifnet* ifp, struct mbuf* m, const struct in_addr* dst, u
                 ether_output(ifp, am, bcast, ETHERTYPE_ARP);
             }
         }
-        return;
+        return 0;
     }
     
-    if (arp_pending_count < ARP_PENDING_MAX) {
-        arp_pending[arp_pending_count].dst = *dst;
-        arp_pending[arp_pending_count].m = m;
-        arp_pending_count++;
-    } else {
+    if (arp_pending_count >= ARP_PENDING_MAX) {
         m_freem(m);
+        return -1;
     }
+    
+    arp_pending[arp_pending_count].dst = *dst;
+    arp_pending[arp_pending_count].m = m;
+    arp_pending_count++;
     
     struct mbuf* am = m_gethdr(MT_DATA);
-    if (!am) return;
+    if (!am) return -1;
     
     am->m_data += sizeof(struct ether_header);
     struct ether_arp* ea = (struct ether_arp*)am->m_data;
@@ -195,4 +197,5 @@ void arp_resolve(struct ifnet* ifp, struct mbuf* m, const struct in_addr* dst, u
     am->m_len = sizeof(struct ether_arp);
     uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     ether_output(ifp, am, bcast, ETHERTYPE_ARP);
+    return 0;
 }

@@ -140,7 +140,5 @@ int ip_output(struct mbuf* m, struct ifnet* ifp) {
         dst.s_addr = htonl(0x0A000202); // 10.0.2.2
     }
     
-    arp_resolve(ifp, m, &dst, dest_enaddr);
-    
-    return 0;
+    return arp_resolve(ifp, m, &dst, dest_enaddr);
 }

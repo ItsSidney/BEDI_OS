@@ -71,6 +71,10 @@ void sys_close(int fd);
 int sys_acpi_get_battery_info(void* info);
 int sys_acpi_get_battery_status(void* status);
 
+// CPU usage tracking (updated by scheduler on each timer tick)
+extern volatile uint64_t cpu_sched_ticks;
+extern volatile uint64_t cpu_busy_ticks;
+
 // Called by interrupt handler
 uint64_t schedule(uint64_t current_rsp);
 task_t* get_current_task(void);

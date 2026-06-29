@@ -99,6 +99,8 @@ void keyboard_handler() {
         else if (sc == 0x50) push_key(KEY_DOWN);
         else if (sc == 0x4B) push_key(KEY_LEFT);
         else if (sc == 0x4D) push_key(KEY_RIGHT);
+        else if (sc == 0x47) push_key(KEY_HOME);
+        else if (sc == 0x4F) push_key(KEY_END);
         else if (sc == 0x49) push_key(KEY_PAGE_UP);
         else if (sc == 0x51) push_key(KEY_PAGE_DOWN);
         return;

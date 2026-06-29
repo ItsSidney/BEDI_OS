@@ -46,5 +46,6 @@ struct icmphdr {
 #define ICMP_MASKREPLY      18
 
 void icmp_input(struct mbuf* m, int off);
+int  icmp_get_echo_reply(uint32_t* src, uint16_t* id, uint16_t* seq);
 
 #endif /* _KERNEL_NET_ICMP_H */

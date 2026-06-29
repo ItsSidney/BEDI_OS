@@ -1,125 +1,155 @@
 // ============================================================
-//  BEDI OS — Professional PCI Hardware Scanner (PRO Edition)
+//  BEDI OS — Modern PCI Hardware Inventory (PRO Edition)
 // ============================================================
 #include "drivers/bus/pci.h"
 #include "gui/wm.h"
 #include "drivers/video/gfx.h"
 #include "drivers/video/framebuffer.h"
 #include "gui/gui.h"
+#include "drivers/input/mouse.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
-#define MAX_ITEMS_PER_PAGE 12
-
-static int pci_page = 0;
-
-static void draw_pci_logo(int x, int y, int size) {
-    uint32_t gold = 0xD29922;
-    uint32_t board = 0x1B1B1B;
-    uint32_t trace = 0x333333;
-    gfx_draw_bevel_rect(x, y, size, size, board, 0);
-    for (int i = 0; i < 8; i++) gfx_fill_rect(x + 4 + i * 4, y + size - 8, 2, 6, gold);
-    gfx_draw_bevel_rect(x + size/4, y + size/4, size/2, size/2, 0x222222, 1);
-    gfx_draw_rect_outline(x + size/4, y + size/4, size/2, size/2, 1, trace);
-}
-
-static void btn_pci_prev(int win_id, int btn_id) {
-    if (pci_page > 0) pci_page--;
-}
-
-static void btn_pci_next(int win_id, int btn_id) {
-    int total = pci_get_device_count();
-    int max_pages = (total + MAX_ITEMS_PER_PAGE - 1) / MAX_ITEMS_PER_PAGE;
-    if (pci_page < max_pages - 1) pci_page++;
-}
+static int pci_scroll = 0;
+static int hover_idx = -1;
+static wm_window_t* last_pci_win = 0;
 
 static void pci_scanner_render(int id, int x, int y, int w, int h, int vx, int vy) {
-    personalization_t* p = get_personalization();
-    uint32_t bg = (p->theme == 0) ? 0x0D1117 : 0xF0F6FC;
-    uint32_t text_clr = (p->theme == 0) ? 0xFFFFFF : 0x000000;
+    (void)id; (void)vx;
+    uint32_t bg = 0x0D1117;
+    uint32_t card_bg = 0x161B22;
+    uint32_t text = 0xE6EDF3;
     uint32_t accent = get_accent_color();
-    uint32_t head_bg = (p->theme == 0) ? 0x161B22 : 0xEEEEEE;
+    uint32_t dim = 0x8B949E;
+    uint32_t border = 0x30363D;
+    uint32_t header_bg = 0x010409;
 
     gfx_fill_rect(x, y, w, h, bg);
-    gfx_draw_bevel_rect(x + 8, y + 8, w - 16, 60, head_bg, 1);
-    
-    draw_pci_logo(x + 20, y + 14, 48);
-    gfx_draw_string_transparent(x + 80, y + 22, "PCI HARDWARE INVENTORY", accent);
-    gfx_draw_string_transparent(x + 80, y + 42, "Subsystem Analysis & Bus Discovery", 0x8B949E);
-    
-    int ty = y + 80;
-    gfx_fill_rect(x + 10, ty, w - 20, 25, (p->theme == 0 ? 0x21262D : 0xDDDDDD));
-    
-    // Dynamic column offsets
-    int col1 = 20;
-    int col2 = 90;
-    int col3 = (w > 400) ? 210 : 180;
 
-    gfx_draw_string_transparent(x + col1, ty + 6, "ADDR", accent);
-    gfx_draw_string_transparent(x + col2, ty + 6, "VENDOR:DEVICE", accent);
-    if (w > 300) gfx_draw_string_transparent(x + col3, ty + 6, "CLASS DESCRIPTION", accent);
-    
-    int total_devices = pci_get_device_count();
-    int start_idx = pci_page * MAX_ITEMS_PER_PAGE;
-    int end_idx = start_idx + MAX_ITEMS_PER_PAGE;
-    if (end_idx > total_devices) end_idx = total_devices;
-    
-    int cy = ty + 35;
-    for (int idx = start_idx; idx < end_idx; idx++) {
-        if (cy + 20 > y + h - 40) break; // Don't draw over footer
-        
-        pci_device_t* dev = pci_get_device(idx);
+    int mx = mouse_get_x(), my = mouse_get_y();
+    int rel_mx = mx - x, rel_my = my - y;
+
+    /* Header */
+    gfx_fill_rect(x, y, w, 52, header_bg);
+    gfx_draw_string_transparent(x + 16, y + 12, "PCI HARDWARE INVENTORY", accent);
+    gfx_draw_string_transparent(x + 16, y + 30, "Complete bus enumeration with device details, BARs, and status", dim);
+
+    int total = pci_get_device_count();
+    int item_h = 72;
+    int visible_h = h - 52 - 24;
+    int max_scroll = total * item_h - visible_h;
+    if (max_scroll < 0) max_scroll = 0;
+    if (pci_scroll < 0) pci_scroll = 0;
+    if (pci_scroll > max_scroll) pci_scroll = max_scroll;
+
+    hover_idx = -1;
+
+    int start_idx = pci_scroll / item_h;
+    int end_idx = total;
+    int card_x = x + 12;
+    int card_w = w - 20;
+    int cur_y = y + 52 - (pci_scroll % item_h);
+
+    for (int i = start_idx; i < end_idx; i++) {
+        if (cur_y + item_h < y + 52) { cur_y += item_h; continue; }
+        if (cur_y + item_h > y + h - 24) break;
+
+        pci_device_t* dev = pci_get_device(i);
         if (!dev) continue;
-        char bsf[16] = "00:00.0";
-        bsf[0] = (dev->bus / 10) + '0'; bsf[1] = (dev->bus % 10) + '0';
-        bsf[3] = (dev->slot / 10) + '0'; bsf[4] = (dev->slot % 10) + '0';
-        bsf[6] = (dev->func % 10) + '0';
-        gfx_draw_string_transparent(x + col1, cy, bsf, 0x8B949E);
-        char vid[16] = "0000:0000";
-        const char hex[] = "0123456789ABCDEF";
-        vid[0]=hex[(dev->vendor_id>>12)&0xF]; vid[1]=hex[(dev->vendor_id>>8)&0xF]; vid[2]=hex[(dev->vendor_id>>4)&0xF]; vid[3]=hex[dev->vendor_id&0xF];
-        vid[5]=hex[(dev->device_id>>12)&0xF]; vid[6]=hex[(dev->device_id>>8)&0xF]; vid[7]=hex[(dev->device_id>>4)&0xF]; vid[8]=hex[dev->device_id&0xF];
-        gfx_draw_string_transparent(x + col2, cy, vid, (p->theme == 0 ? 0xF0883E : 0xAF5800));
-        
-        if (w > 300) {
-            const char* cls = pci_get_class_name(dev->class_id);
-            char cls_disp[32];
-            int cl = gfx_strlen(cls);
-            int max_cl = (w - col3 - 20) / 8;
-            if (cl > max_cl && max_cl > 3) {
-                for(int i=0; i<max_cl-3; i++) cls_disp[i] = cls[i];
-                cls_disp[max_cl-3] = '.'; cls_disp[max_cl-2] = '.'; cls_disp[max_cl-1] = '.'; cls_disp[max_cl] = 0;
-                gfx_draw_string_transparent(x + col3, cy, cls_disp, text_clr);
-            } else {
-                gfx_draw_string_transparent(x + col3, cy, cls, text_clr);
-            }
+
+        int is_hover = (rel_mx >= card_x && rel_mx <= card_x + card_w && rel_my >= cur_y && rel_my <= cur_y + item_h - 4);
+        if (is_hover) hover_idx = i;
+
+        /* Card background */
+        uint32_t card_fill = is_hover ? 0x1C2128 : card_bg;
+        gfx_fill_rect(card_x, cur_y, card_w, item_h - 4, card_fill);
+        gfx_draw_rect_outline(card_x, cur_y, card_w, item_h - 4, 1, border);
+
+        int inner_x = card_x + 10;
+        int inner_y = cur_y + 6;
+        int inner_w = card_w - 18;
+
+        /* Row 1: Address + ID */
+        char bsf[16];
+        snprintf(bsf, sizeof(bsf), "%02X:%02X.%X", dev->bus, dev->slot, dev->func);
+        gfx_draw_string_transparent(inner_x, inner_y, bsf, accent);
+
+        char vidpid[16];
+        snprintf(vidpid, sizeof(vidpid), "%04X:%04X", dev->vendor_id, dev->device_id);
+        int vp_w = gfx_strlen(vidpid) * 8;
+        gfx_draw_string_transparent(inner_x + inner_w - vp_w, inner_y, vidpid, accent);
+
+        inner_y += 16;
+
+        /* Row 2: Vendor + Device name */
+        const char* vname = pci_vendor_to_string(dev->vendor_id);
+        const char* dname = pci_device_to_string(dev->vendor_id, dev->device_id);
+        char vendor_dev[128];
+        snprintf(vendor_dev, sizeof(vendor_dev), "%s %s", vname, dname);
+
+        int max_chars = (inner_w) / 8;
+        if ((int)gfx_strlen(vendor_dev) > max_chars && max_chars > 3) {
+            vendor_dev[max_chars - 3] = '.'; vendor_dev[max_chars - 2] = '.'; vendor_dev[max_chars - 1] = '.'; vendor_dev[max_chars] = 0;
         }
-        
-        cy += 20;
-        if (idx < end_idx - 1) gfx_draw_hline(x + 15, cy - 4, w - 30, (p->theme == 0 ? 0x21262D : 0xEEEEEE));
+        gfx_draw_string_transparent(inner_x, inner_y, vendor_dev, text);
+        inner_y += 14;
+
+        /* Row 3: Class/Subclass/ProgIF + IRQ + BAR summary */
+        const char* cls = pci_get_class_name(dev->class_id);
+        char detail[128];
+        if (dev->interrupt_line != 0xFF && dev->interrupt_line != 0) {
+            snprintf(detail, sizeof(detail), "%s / %02X / IRQ %u", cls, dev->subclass, (unsigned)dev->interrupt_line);
+        } else {
+            snprintf(detail, sizeof(detail), "%s / %02X", cls, dev->subclass);
+        }
+        gfx_draw_string_transparent(inner_x, inner_y, detail, dim);
+
+        /* BAR summary */
+        char bar_sum[64] = "";
+        int bar_off = 0;
+        for (int b = 0; b < 6 && bar_off < (int)(sizeof(bar_sum) - 16); b++) {
+            if (dev->bar[b] & 1) {
+                snprintf(bar_sum + bar_off, sizeof(bar_sum) - bar_off, "I/O%X=%X ", b, dev->bar[b] & ~1);
+            } else if (dev->bar[b]) {
+                snprintf(bar_sum + bar_off, sizeof(bar_sum) - bar_off, "MEM%X=%X ", b, dev->bar[b] >> 4);
+            }
+            bar_off = (int)gfx_strlen(bar_sum);
+        }
+        int bar_len = (int)gfx_strlen(bar_sum);
+        if (bar_len > 0) {
+            int bw = bar_len * 8;
+            gfx_draw_string_transparent(inner_x + inner_w - bw, inner_y, bar_sum, 0x6E7681);
+        }
+
+        cur_y += item_h;
     }
-    
-    int fy = y + h - 35;
-    gfx_draw_hline(x + 10, fy - 5, w - 20, (p->theme == 0 ? 0x30363D : 0xCCCCCC));
-    char pg[16] = "PAGE 0/0";
-    pg[5] = (pci_page + 1) + '0';
-    int mp = (total_devices + MAX_ITEMS_PER_PAGE - 1) / MAX_ITEMS_PER_PAGE;
-    if (mp == 0) mp = 1;
-    pg[7] = mp + '0';
-    gfx_draw_string_transparent(x + w/2 - 30, fy + 5, pg, 0x8B949E);
+
+    /* Footer */
+    int fy = y + h - 20;
+    gfx_fill_rect(x + 12, fy - 4, w - 24, 1, border);
+    char pg[16];
+    snprintf(pg, sizeof(pg), "%d / %d", total, total);
+    int pw = gfx_strlen(pg) * 8;
+    gfx_draw_string_transparent(x + (w - pw) / 2, fy + 4, pg, dim);
 }
 
 static void pci_on_resize(int win_id, int w, int h) {
-    wm_clear_buttons(win_id);
-    int body_h = h - WM_TITLEBAR_H;
-    int btn_y = body_h - 32; // Standard bottom alignment
-    wm_add_button(win_id, 1, 15, btn_y, 80, 25, "PREV", 0x30363D, 0xFFFFFF, btn_pci_prev);
-    wm_add_button(win_id, 2, w - 95, btn_y, 80, 25, "NEXT", 0x30363D, 0xFFFFFF, btn_pci_next);
+    wm_window_t* win = wm_get_window(win_id);
+    if (win) win->content_h = 900;
+    last_pci_win = win;
 }
 
 void pci_scanner_app(void) {
-    pci_page = 0;
+    pci_scroll = 0;
     uint32_t fw = get_fb_width(), fh = get_fb_height();
-    int win_w = 500, win_h = 420;
-    int win = wm_open_window((fw-win_w)/2, (fh-win_h)/2, win_w, win_h, "PCI Professional Inventory",
-                             get_accent_color(), pci_scanner_render, 0, pci_on_resize);
-    pci_on_resize(win, win_w, win_h);
+    int win_w = 800, win_h = 520;
+    int win = wm_open_window((fw - win_w) / 2, (fh - win_h) / 2, win_w, win_h, "PCI Professional Inventory",
+                             get_accent_color(), pci_scanner_render, NULL, pci_on_resize);
+    if (win >= 0) {
+        wm_window_t* wptr = wm_get_window(win);
+        if (wptr) wptr->content_h = 900;
+        last_pci_win = wptr;
+    }
 }

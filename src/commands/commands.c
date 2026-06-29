@@ -26,27 +26,13 @@ static const char* commands[] = {
     "help", "about", "clear", "timer_test", "reboot", "shutdown", 
     "ls", "rm", "mkdir", "cd", "pwd", "cat", 
     "touch", "rmdir", "gui", "pcilist", "meminfo", 
-    "syscheck", "uptime", "hexdump", "gpu_3d",
+    "syscheck", "uptime", "hexdump", "lsgpu",
     "write", "append", "cp", "mv", "rename", "stat", "grep",
-    "bdim", "colors", "bdfetch", "bcc", "brun", "vmtest", "ring3test", "ping", "dns", "bootlog", "bdrowser", 0
+    "bdim", "colors", "bdfetch", "bcc", "brun", "vmtest", "ring3test", "ping", "dns", "bootlog", "httpviewer", 0
 };
 
 void vmtest() {
-    int fd = fs_create("test.bin");
-    if (fd < 0) { print_string("\n  vmtest: Failed to create test.bin\n"); return; }
-    
-    // Bytecode: 
-    // [0x08] OP_PRINT
-    // [0x06 0x00 0x00 0x00] Offset to string (6 bytes past start of instruction)
-    // [0x0E] OP_EXIT
-    // ['H', 'e', 'l', 'l', 'o', 0] String data
-    uint8_t code[] = {0x08, 0x06, 0x00, 0x00, 0x00, 0x0E, 'H', 'e', 'l', 'l', 'o', 0};
-    
-    fs_write(fd, (char*)code, 12);
-    fs_close(fd);
-    
-    extern void brun_main(char*);
-    brun_main("test.bin");
+    print_string("\n  vmtest: test.bin removed from sample files\n");
 }
 
 extern void ring3_entry(void);
@@ -235,7 +221,7 @@ void execute_command(char* input) {
         print_string("    meminfo          - Show memory usage\n");
         print_string("    syscheck         - Perform system integrity check\n");
         print_string("    pcilist          - List detected PCI devices\n");
-        print_string("    gpu_3d           - Check GPU status and test 3D acceleration\n");
+        print_string("    lsgpu            - List detected GPU devices\n");
         print_string("    gui              - Launch graphical user interface\n");
         print_string("    bdfetch          - Display system information (BEDI OS fetch)\n");
         print_string("    bcc              - Simple C Compiler\n");
@@ -260,7 +246,7 @@ void execute_command(char* input) {
         print_string("    colors           - Change terminal text color\n");
         print_string("    ping             - Send ICMP Echo Request (IP or hostname)\n");
         print_string("    dns              - Resolve a hostname to IP\n");
-        print_string("    bdrowser         - Launch the web browser (HTTP)\n");
+        print_string("    httpviewer       - Launch HTTP viewer\n");
     } else if (strcmp(input, "about") == 0) {
         print_string("\n  BEDI OS 64-bit UEFI\n  Target: Generic x86_64\n  Author: Sidney\n");
     } else if (strcmp(input, "ls") == 0) {
@@ -400,7 +386,8 @@ void execute_command(char* input) {
     } else if (strncmp(input, "grep ", 5) == 0) {
         print_string("\n  Grep not fully implemented\n");
     } else if (strncmp(input, "bdim ", 5) == 0 || strcmp(input, "bdim") == 0) {
-        extern void bdim_app(const char* filename);
+        extern void bdim_new(void);
+        extern void bdim_open(const char* filename);
         if (input[4] == ' ' && strncmp(input + 5, "--help", 6) == 0) {
             print_string("\n  bdim — BEDI Editor (Vim-like)\n");
             print_string("  Usage: bdim [filename]\n");
@@ -416,8 +403,8 @@ void execute_command(char* input) {
             print_string("    Tab       Trigger autocomplete (in INSERT)\n");
             print_string("    h/j/k/l   Move cursor (in NORMAL)\n");
             print_string("    :         Command mode\n");
-        } else if (input[4] == ' ') bdim_app(input + 5);
-        else bdim_app(0);
+        } else if (input[4] == ' ') bdim_open(input + 5);
+        else bdim_new();
     } else if (strcmp(input, "pcilist") == 0) {
         print_string("\n  Scanning PCI Bus...\n");
         int count = pci_get_device_count();
@@ -453,29 +440,37 @@ void execute_command(char* input) {
         } else {
             print_string("  [WARN] GPU not detected or basic VGA only\n");
         }
-    } else if (strcmp(input, "gpu_3d") == 0) {
-        gpu_device_t* gpu = gpu_get_primary();
-        if (!gpu) {
-            print_string("\n  No GPU detected or driver not initialized.\n");
-            print_string("  Acceleration: Software fallback\n");
-        } else {
-            print_string("\n  GPU Info:\n");
-            print_string("    Name: "); print_string(gpu->name); print_string("\n");
-            print_string("    Vendor: 0x"); 
-            char buf[16]; itoa(gpu->vendor_id, buf); print_string(buf);
-            print_string(" Device: 0x"); itoa(gpu->device_id, buf); print_string(buf);
-            print_string("\n  Resolution: "); itoa(gpu->width, buf); print_string(buf); print_string("x"); itoa(gpu->height, buf); print_string(buf); print_string("\n");
-            
-            uint32_t caps = gpu_get_capabilities();
-            print_string("    Capabilities:\n");
-            if (caps & GPU_CAP_2D) print_string("      [ YES ] 2D Acceleration (Compatible Mode)\n");
-            if (caps & GPU_CAP_3D) print_string("      [ YES ] 3D Acceleration (Hardware Ready)\n");
-            if (caps == 0) print_string("      [Software] CPU-based rendering\n");
-            
-            if (caps & GPU_CAP_3D) {
-                print_string("\n  Hardware 3D Test: RCS Pipeline infrastructure present.\n");
+    } else if (strcmp(input, "lsgpu") == 0) {
+        print_string("\n  GPU Devices:\n");
+        int count = pci_get_device_count();
+        int found = 0;
+        for (int i = 0; i < count; i++) {
+            pci_device_t* dev = pci_get_device(i);
+            if (dev->class_id == 0x03) {
+                found = 1;
+                char buf[32];
+                print_string("  [");
+                buf[0] = (dev->bus / 10) + '0'; buf[1] = (dev->bus % 10) + '0'; buf[2] = ':';
+                buf[3] = (dev->slot / 10) + '0'; buf[4] = (dev->slot % 10) + '0'; buf[5] = '.';
+                buf[6] = (dev->func % 10) + '0'; buf[7] = 0;
+                print_string(buf); print_string("] ");
+                const char* vendor = pci_vendor_to_string(dev->vendor_id);
+                const char* device = pci_device_to_string(dev->vendor_id, dev->device_id);
+                if (dev->vendor_id == 0x1234 && dev->device_id == 0x1111) {
+                    print_string("QEMU Virtual Video Controller");
+                } else if (dev->vendor_id == 0x1AF4) {
+                    print_string("VirtIO GPU");
+                } else if (strcmp(vendor, "Unknown Vendor") == 0 && strcmp(device, "Unknown Device") == 0) {
+                    print_string("Generic Virtual Display Controller (Compatible Mode)");
+                } else {
+                    print_string(vendor);
+                    print_string(" / ");
+                    print_string(device);
+                }
+                print_string("\n");
             }
         }
+        if (!found) print_string("  No display controllers found.\n");
     } else if (strcmp(input, "clear") == 0) {
         clear_screen();
         swap_buffers();
@@ -696,9 +691,9 @@ void execute_command(char* input) {
         ping(input + 5);
     } else if (strncmp(input, "dns ", 4) == 0) {
         dns_lookup(input + 4);
-    } else if (strcmp(input, "bdrowser") == 0) {
-        extern void bdrowser(void);
-        bdrowser();
+    } else if (strcmp(input, "httpviewer") == 0) {
+        extern void httpviewer(void);
+        httpviewer();
     } else if (strcmp(input, "bootlog") == 0) {
         bootlog();
     } else if (strlen(input) > 0) {

@@ -30,9 +30,10 @@ struct socket {
     uint32_t so_rcv_len;
     
     /* TCP sequence numbers */
-    uint32_t so_seq;
-    uint32_t so_ack;
-    int      so_closed; /* Set to 1 when FIN received */
+    uint32_t so_seq;     /* Next sequence number to send */
+    uint32_t so_ack;     /* Next expected sequence number from remote */
+    uint32_t so_una;     /* Oldest unacknowledged sequence number */
+    int      so_closed;  /* Set to 1 when FIN received */
 };
 
 /* State flags */

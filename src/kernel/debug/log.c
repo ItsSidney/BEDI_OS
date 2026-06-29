@@ -30,6 +30,14 @@ void klog(const char* s) {
     logging_locked = 0;
 }
 
+const char* log_get_buffer(void) {
+    return log_buffer;
+}
+
+int log_get_size(void) {
+    return log_index;
+}
+
 void log_dump(void) {
     if (!log_buffer) {
         print_string("  Log: Not initialized\n");

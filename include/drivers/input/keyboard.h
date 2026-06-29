@@ -12,6 +12,8 @@
 #define KEY_PAGE_DOWN 134
 #define KEY_LSHIFT    135
 #define KEY_RSHIFT    136
+#define KEY_HOME      137
+#define KEY_END       138
 #define KEY_ESC   27
 #define KEY_SUPER 132
 

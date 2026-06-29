@@ -114,57 +114,44 @@ static int e1000_init(struct ifnet* ifp) {
     struct e1000_softc* sc = ifp->if_softc;
 
     boot_log_add("e1000", "Starting init...", 0xF0883E, 0x3FB950);
-    draw_boot_log();
 
     // Disable interrupts
     e1000_write(sc, E1000_REG_IMS, 0);
     e1000_write(sc, E1000_REG_ICR, 0xFFFFFFFF);
-
-    boot_log_add("e1000", "Reset device...", 0xF0883E, 0x3FB950);
-    draw_boot_log();
 
     // Reset device - skip for I219/I225 as they may not support standard reset
     uint16_t dev_id = sc->pci_dev->device_id;
     if (dev_id != 0x1570 && dev_id != 0x15F3 && dev_id != 0x24F3) {
         e1000_write(sc, E1000_REG_CTRL, E1000_CTRL_RST);
 
-        // Wait for reset to complete
-        int timeout = 100000;
+        int timeout = 1000;
         while ((e1000_read(sc, E1000_REG_CTRL) & E1000_CTRL_RST) && timeout-- > 0) {
             __asm__("pause");
         }
         if (timeout <= 0) {
-            boot_log_add("e1000", "Reset timeout, continuing...", 0xF0883E, 0xF0883E);
-            draw_boot_log();
+            boot_log_add("e1000", "Reset timeout", 0xF0883E, 0xF0883E);
         } else {
             boot_log_add("e1000", "Reset done", 0xF0883E, 0x3FB950);
-            draw_boot_log();
         }
     } else {
         boot_log_add("e1000", "Skipping reset for I219/I225", 0xF0883E, 0x3FB950);
-        draw_boot_log();
     }
 
     // Re-enable PCI bus mastering after reset
     pci_enable_bus_mastering(sc->pci_dev);
-
-    boot_log_add("e1000", "Bus mastering enabled", 0xF0883E, 0x3FB950);
-    draw_boot_log();
+    boot_log_add("e1000", "Bus mastering OK", 0xF0883E, 0x3FB950);
 
     // Force Link Up immediately
     uint32_t ctrl = e1000_read(sc, E1000_REG_CTRL);
     e1000_write(sc, E1000_REG_CTRL, ctrl | E1000_CTRL_SLU | E1000_CTRL_ASDE);
 
-    // Quick non-blocking link check
-    // Use busy wait instead of sleep_task to avoid scheduler issues during early init
-    for (volatile int i = 0; i < 5000000; i++) __asm__("pause");
+    for (volatile int i = 0; i < 5000; i++) __asm__("pause");
     if (e1000_read(sc, E1000_REG_STATUS) & E1000_STATUS_LU) {
         boot_log_add("e1000", "Link UP", 0xF0883E, 0x3FB950);
-        draw_boot_log();
     } else {
-        boot_log_add("e1000", "Link unavailable (forced SLU)", 0xF0883E, 0xF0883E);
-        draw_boot_log();
+        boot_log_add("e1000", "Link forced", 0xF0883E, 0xF0883E);
     }
+    draw_boot_log();
 
     // Re-initialize MAC address registers
     uint32_t ral;
@@ -299,43 +286,20 @@ static int e1000_output(struct ifnet* ifp, struct mbuf* m) {
 
 void e1000_poll(struct ifnet* ifp) {
     struct e1000_softc* sc = ifp->if_softc;
-    /* Force correct RCTL value */
-    uint32_t correct_rctl = RCTL_EN | RCTL_SBP | RCTL_UPE | RCTL_MPE | RCTL_BAM | RCTL_SZ_2048 | RCTL_SECRC;
-    uint32_t current_rctl = e1000_read(sc, E1000_REG_RCTL);
-    if (current_rctl != correct_rctl) {
-        e1000_write(sc, E1000_REG_RCTL, current_rctl & ~RCTL_EN);
-        for (volatile int i = 0; i < 10000; i++) __asm__("pause");
-        e1000_write(sc, E1000_REG_RCTL, correct_rctl);
-        sc->rx_cur = 0;
-        e1000_write(sc, E1000_REG_RDH, 0);
-        e1000_write(sc, E1000_REG_RDT, RX_DESC_COUNT - 1);
-    }
-
-    /* RDH-driven receive loop */
     uint32_t rdh = e1000_read(sc, E1000_REG_RDH);
-    uint32_t rdt = e1000_read(sc, E1000_REG_RDT);
-    int max_packets = 32;
-    int got = 0;
-    while (got < max_packets) {
-        if (sc->rx_cur == rdh) break;
-        if (sc->rx_cur == rdt) {
-            sc->rx_cur = (rdh + 1) % RX_DESC_COUNT;
-            rdh = e1000_read(sc, E1000_REG_RDH);
-            rdt = e1000_read(sc, E1000_REG_RDT);
-            continue;
-        }
-        if (!(sc->rx_descs[sc->rx_cur].status & 0x1)) {
-            sc->rx_cur = (sc->rx_cur + 1) % RX_DESC_COUNT;
-            rdh = e1000_read(sc, E1000_REG_RDH);
-            rdt = e1000_read(sc, E1000_REG_RDT);
-            continue;
-        }
-        got++;
-        uint16_t len = sc->rx_descs[sc->rx_cur].len;
+    int processed = 0;
 
+    while (processed < 32 && sc->rx_cur != (uint16_t)rdh) {
+        uint16_t cur = sc->rx_cur;
+
+        if (!(sc->rx_descs[cur].status & 0x1)) {
+            break;
+        }
+
+        uint16_t len = sc->rx_descs[cur].len;
         struct mbuf* m = m_getcl(MT_DATA);
         if (m) {
-            memcpy(m->m_data, sc->rx_buffers[sc->rx_cur], len);
+            memcpy(m->m_data, sc->rx_buffers[cur], len);
             m->m_len = len;
             m->m_pkthdr.len = len;
             m->m_pkthdr.rcvif = ifp;
@@ -343,12 +307,11 @@ void e1000_poll(struct ifnet* ifp) {
             ether_input(ifp, m);
         }
 
-        sc->rx_descs[sc->rx_cur].status = 0;
-        uint16_t old_cur = sc->rx_cur;
-        sc->rx_cur = (sc->rx_cur + 1) % RX_DESC_COUNT;
-        e1000_write(sc, E1000_REG_RDT, old_cur);
+        sc->rx_descs[cur].status = 0;
+        sc->rx_cur = (cur + 1) % RX_DESC_COUNT;
+        e1000_write(sc, E1000_REG_RDT, cur);
+        processed++;
         rdh = e1000_read(sc, E1000_REG_RDH);
-        rdt = e1000_read(sc, E1000_REG_RDT);
     }
 }
 

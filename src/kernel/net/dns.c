@@ -148,6 +148,7 @@ int dns_resolve(const char* hostname, uint32_t* ip_addr)
         uint32_t src_ip;
         uint16_t src_port;
         if (udp_recv(sport, &src_ip, &src_port, reply, &reply_len) == 0) {
+            if (src_ip != dns_server || src_port != htons(DNS_PORT)) continue;
             if (reply_len < sizeof(struct dns_header)) {
 //                print_string("  DNS: Reply too short\n");
                 return -1;

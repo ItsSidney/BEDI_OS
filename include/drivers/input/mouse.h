@@ -32,4 +32,8 @@ void mouse_draw_cursor(void);
 void mouse_set_sensitivity(int level);
 int mouse_get_sensitivity(void);
 
+// Scroll wheel
+int mouse_get_wheel_delta(void);
+void mouse_clear_wheel_delta(void);
+
 #endif

@@ -11,6 +11,7 @@ extern void draw_premium_wallpaper(void);
 extern void draw_taskbar(void);
 
 #define MAX_BUTTONS_PER_WINDOW 512
+#define DESKTOP_COUNT 5
 
 static wm_window_t windows[WM_MAX_WINDOWS];
 static int window_count = 0;
@@ -18,6 +19,7 @@ static int focused_id = -1;
 static int next_win_id = 1;
 static int prev_mouse_btn = 0;
 static int current_desktop = 0;
+static int desktop_prev[DESKTOP_COUNT] = {0, 0, 0, 0, 0};
 
 #define TOP_BAR_H 36
 
@@ -31,6 +33,7 @@ void wm_init(void) {
         windows[i].flags = 0;
         windows[i].button_count = 0;
     }
+    for (int i = 0; i < DESKTOP_COUNT; i++) desktop_prev[i] = 0;
 }
 
 static wm_window_t* find_window(int id) {
@@ -69,17 +72,20 @@ int wm_open_window(int x, int y, int w, int h, const char* title, uint32_t accen
     win->id = next_win_id++;
     win->x = x; if (win->x < 0) win->x = 0;
     win->y = y; if (win->y < TOP_BAR_H) win->y = TOP_BAR_H;
-    if (win->y + win->h > get_fb_height() - TASKBAR_H) win->y = get_fb_height() - TASKBAR_H - win->h;
     win->w = w; win->h = h;
+    int max_h = get_fb_height() - TASKBAR_H - TOP_BAR_H;
+    if (win->h > max_h) win->h = max_h;
+    if (win->y + win->h > get_fb_height() - TASKBAR_H) win->y = get_fb_height() - TASKBAR_H - win->h;
     win->desktop = current_desktop;
     win->view_x = 0; win->view_y = 0;
-    win->content_w = w; win->content_h = h - WM_TITLEBAR_H;
+    win->content_w = win->w; win->content_h = win->h - WM_TITLEBAR_H;
     int j = 0; while (title[j] && j < 63) { win->title[j] = title[j]; j++; } win->title[j] = 0;
     win->accent_color = accent;
     win->flags = WM_FLAG_VISIBLE;
     win->on_render = on_render;
     win->on_key = on_key;
     win->on_resize = on_resize;
+    win->on_mouse = 0;
     win->button_count = 0;
     win->app_data = 0;
 
@@ -89,6 +95,8 @@ int wm_open_window(int x, int y, int w, int h, const char* title, uint32_t accen
 }
 
 void wm_close_window(int id) {
+    extern void term_notify_closed(int);
+    term_notify_closed(id);
     wm_window_t* win = find_window(id);
     if (win) {
         win->id = -1;
@@ -119,11 +127,35 @@ void wm_clear_buttons(int win_id) {
     if (win) win->button_count = 0;
 }
 
+void wm_set_mouse_handler(int win_id, wm_mouse_cb cb) {
+    wm_window_t* win = find_window(win_id);
+    if (win) win->on_mouse = cb;
+}
+
 void wm_set_button_active(int win_id, int btn_id, int active) {
     wm_window_t* win = find_window(win_id);
     if (!win) return;
     for (int i = 0; i < win->button_count; i++) {
         if (win->buttons[i].id == btn_id) { win->buttons[i].is_active = active; break; }
+    }
+}
+
+void wm_refresh_all_button_theme(void) {
+    uint32_t btn_bg = theme_get_color(THEME_ROLE_BUTTON_BG);
+    uint32_t btn_text = theme_get_color(THEME_ROLE_BUTTON_TEXT);
+    for (int i = 0; i < WM_MAX_WINDOWS; i++) {
+        wm_window_t* win = &windows[i];
+        if (win->id == -1) continue;
+        for (int b = 0; b < win->button_count; b++) {
+            if (!win->buttons[b].is_active) continue;
+            if (win->buttons[b].bg_color == 0x6B7280 || win->buttons[b].bg_color == 0xEF4444 ||
+                win->buttons[b].bg_color == 0x30363D || win->buttons[b].bg_color == 0x3A3A3C) {
+                win->buttons[b].bg_color = btn_bg;
+            }
+            if (win->buttons[b].fg_color == 0x000000 || win->buttons[b].fg_color == 0xFFFFFF) {
+                win->buttons[b].fg_color = btn_text;
+            }
+        }
     }
 }
 
@@ -160,10 +192,10 @@ static void render_window(wm_window_t* win) {
     gfx_push_clip(x, y, w, h);
 
     personalization_t* p = get_personalization();
-    uint32_t bg_main = (p->theme == 0) ? 0x15171D : 0xF8F9FA;
-    uint32_t text_clr = (p->theme == 0) ? 0xE4E6EA : 0x202124;
-    uint32_t border_clr = is_focused ? (p->theme == 0 ? 0x383B44 : 0xDADCE0) : (p->theme == 0 ? 0x262830 : 0xE8EAED);
-    uint32_t title_bg = (p->theme == 0) ? 0x1D1F26 : 0xF0F1F3;
+    uint32_t bg_main    = theme_get_color(THEME_ROLE_WINDOW_BG);
+    uint32_t text_clr   = theme_get_color(THEME_ROLE_PRIMARY);
+    uint32_t border_clr = is_focused ? theme_get_color(THEME_ROLE_OUTLINE) : theme_get_color(THEME_ROLE_SURFACE_VARIANT);
+    uint32_t title_bg   = theme_get_color(THEME_ROLE_WINDOW_TITLE);
     uint32_t accent = win->accent_color;
 
     if (is_focused) {
@@ -175,12 +207,8 @@ static void render_window(wm_window_t* win) {
 
     int title_h = WM_TITLEBAR_H;
     gfx_fill_rect(x + 1, y + 1, w - 2, title_h - 1, title_bg);
-
-    if (is_focused) {
-        gfx_fill_rect(x + 1, y + title_h, w - 2, 1, gfx_darken(border_clr, 10));
-    } else {
-        gfx_draw_hline(x + 1, y + title_h, w - 2, gfx_darken(border_clr, 15));
-    }
+    /* Title-like bar: no border, so title text doesn’t look cut off */
+    gfx_fill_rect(x + 1, y + 1, w - 2, title_h - 1, title_bg);
 
     gfx_draw_string_transparent(x + 12, y + (title_h - 16) / 2, win->title, text_clr);
 
@@ -194,7 +222,7 @@ static void render_window(wm_window_t* win) {
 
     int mx = mouse_get_x(), my = mouse_get_y();
     int close_hover = point_in_rect(mx, my, win->close_btn_x, win->close_btn_y, win->close_btn_w, win->close_btn_h);
-    gfx_fill_rect(close_x, btn_y, btn_size, btn_size, close_hover ? 0xE81123 : (p->theme == 0 ? 0x262830 : 0xDADCE0));
+    gfx_fill_rect(close_x, btn_y, btn_size, btn_size, close_hover ? 0xE81123 : theme_get_color(THEME_ROLE_BUTTON_BG));
     gfx_draw_string_transparent(close_x + 5, btn_y + 2, "x", text_clr);
 
     gfx_push_clip(x + 1, y + WM_TITLEBAR_H + 1, w - 2, h - WM_TITLEBAR_H - 2);
@@ -208,21 +236,21 @@ static void render_window(wm_window_t* win) {
         int bx = x + win->buttons[b].x;
         int by = y + WM_TITLEBAR_H + win->buttons[b].y;
         uint32_t btn_bg = win->buttons[b].is_hovered ? gfx_lighten(win->buttons[b].bg_color, 20) : win->buttons[b].bg_color;
-        gfx_fill_rect(bx, by, win->buttons[b].w, win->buttons[b].h, btn_bg);
+        gfx_fill_rect_rounded(bx, by, win->buttons[b].w, win->buttons[b].h, 8, btn_bg);
         gfx_draw_string_transparent(bx + (win->buttons[b].w - gfx_strlen(win->buttons[b].label) * 8) / 2,
                                     by + (win->buttons[b].h - 16) / 2, win->buttons[b].label, win->buttons[b].fg_color);
     }
 
     if (win->content_h > (h - WM_TITLEBAR_H)) {
         int sb_w = 6, sb_x = x + w - sb_w - 2, sb_y = y + WM_TITLEBAR_H + 2, sb_h = h - WM_TITLEBAR_H - 4;
-        gfx_fill_rect(sb_x, sb_y, sb_w, sb_h, (p->theme == 0 ? 0x0D0E12 : 0xF0F1F3));
+        gfx_fill_rect(sb_x, sb_y, sb_w, sb_h, theme_get_color(THEME_ROLE_SURFACE_VARIANT));
         int thumb_h = (sb_h * sb_h) / win->content_h;
         if (thumb_h < 16) thumb_h = 16;
         int thumb_y = sb_y + (win->view_y * (sb_h - thumb_h)) / (win->content_h - (h - WM_TITLEBAR_H));
         gfx_fill_rect(sb_x + 1, thumb_y, sb_w - 2, thumb_h, border_clr);
     }
 
-    uint32_t handle_clr = (p->theme == 0) ? 0x4D5059 : 0xBDC1C6;
+    uint32_t handle_clr = theme_get_color(THEME_ROLE_SCROLLBAR);
     for (int i = 0; i < 3; i++) {
         uint32_t c = gfx_lerp_color(handle_clr, bg_main, i, 3);
         gfx_fill_rect(x + w - 8 - i*4, y + h - 4, 3, 3, c);
@@ -256,7 +284,9 @@ int wm_tick(void) {
         if (win->flags & WM_FLAG_DRAGGING) {
             if (mbtn & 1) {
                 win->x = mx - win->drag_offset_x; win->y = my - win->drag_offset_y;
+                if (win->x < 0) win->x = 0;
                 if (win->y < TOP_BAR_H) win->y = TOP_BAR_H;
+                if (win->x + win->w > fw) win->x = fw - win->w;
                 if (win->y + win->h > fh - TASKBAR_H) win->y = fh - TASKBAR_H - win->h;
             } else win->flags &= ~WM_FLAG_DRAGGING;
         }
@@ -276,46 +306,57 @@ int wm_tick(void) {
     }
 
     if (clicked) {
+        int click_handled = 0;
         wm_window_t* hit = window_at_point(mx, my);
         if (hit) {
             bring_to_front(hit);
 
             if (point_in_rect(mx, my, hit->close_btn_x, hit->close_btn_y, hit->close_btn_w, hit->close_btn_h)) {
-                wm_close_window(hit->id); goto done;
+                wm_close_window(hit->id); click_handled = 1;
             }
 
-            if (point_in_rect(mx, my, hit->x + hit->w - 20, hit->y + hit->h - 20, 20, 20)) {
+            if (!click_handled && point_in_rect(mx, my, hit->x + hit->w - 20, hit->y + hit->h - 20, 20, 20)) {
                 hit->flags |= WM_FLAG_RESIZING;
                 hit->start_w = hit->w; hit->start_h = hit->h;
                 hit->drag_offset_x = mx; hit->drag_offset_y = my;
-                goto done;
+                click_handled = 1;
             }
 
-            if (point_in_rect(mx, my, hit->x, hit->y, hit->w, WM_TITLEBAR_H)) {
+            if (!click_handled && point_in_rect(mx, my, hit->x, hit->y, hit->w, WM_TITLEBAR_H)) {
                 hit->flags |= WM_FLAG_DRAGGING; hit->drag_offset_x = mx - hit->x; hit->drag_offset_y = my - hit->y;
+                click_handled = 1;
             }
 
-            if (hit->content_h > (hit->h - WM_TITLEBAR_H)) {
+            if (!click_handled && hit->content_h > (hit->h - WM_TITLEBAR_H)) {
                 int sb_w = 10, sb_x = hit->x + hit->w - sb_w - 2;
                 if (point_in_rect(mx, my, sb_x, hit->y + WM_TITLEBAR_H, sb_w, hit->h - WM_TITLEBAR_H)) {
                     hit->view_y = ((my - (hit->y + WM_TITLEBAR_H)) * hit->content_h) / (hit->h - WM_TITLEBAR_H) - (hit->h / 4);
                     if (hit->view_y < 0) hit->view_y = 0;
                     int max_v = hit->content_h - (hit->h - WM_TITLEBAR_H);
                     if (hit->view_y > max_v) hit->view_y = (max_v > 0 ? max_v : 0);
-                    goto done;
+                    click_handled = 1;
                 }
             }
 
-            for (int b = 0; b < hit->button_count; b++) {
-                if (!hit->buttons[b].is_active) continue;
-                int bx = hit->x + hit->buttons[b].x;
-                int by = hit->y + WM_TITLEBAR_H + hit->buttons[b].y;
-                if (point_in_rect(mx, my, bx, by, hit->buttons[b].w, hit->buttons[b].h)) {
-                    if (hit->buttons[b].on_click) hit->buttons[b].on_click(hit->id, hit->buttons[b].id);
-                    goto done;
+            if (!click_handled) {
+                for (int b = 0; b < hit->button_count; b++) {
+                    if (!hit->buttons[b].is_active) continue;
+                    int bx = hit->x + hit->buttons[b].x;
+                    int by = hit->y + WM_TITLEBAR_H + hit->buttons[b].y;
+                    if (point_in_rect(mx, my, bx, by, hit->buttons[b].w, hit->buttons[b].h)) {
+                        if (hit->buttons[b].on_click) hit->buttons[b].on_click(hit->id, hit->buttons[b].id);
+                        click_handled = 1;
+                        break;
+                    }
                 }
             }
-        } else if (my < (int)fh - 36) {
+
+            if (!click_handled && hit->on_mouse) {
+                int rel_x = mx - hit->x;
+                int rel_y = my - (hit->y + WM_TITLEBAR_H);
+                hit->on_mouse(hit->id, rel_x, rel_y, mbtn);
+            }
+        } else if (my < (int)fh - TASKBAR_H) {
             focused_id = -1; for (int i = 0; i < WM_MAX_WINDOWS; i++) windows[i].flags &= ~WM_FLAG_FOCUSED;
         }
     }
@@ -332,6 +373,10 @@ done:
     extern int gui_is_menu_open(void), gui_is_search_open(void), gui_is_topbar_cfg_open(void);
     if ((keyboard_is_key_down(0x5B) || keyboard_is_key_down(0x5C)) && (key == 's' || key == 'S')) { gui_open_search(); key = 0; }
     else if (key == 132) { gui_toggle_start_menu(); key = 0; }
+    else if (keyboard_is_key_down(0x1D) && keyboard_is_key_down(0x38)) {
+        if (key == KEY_LEFT && current_desktop > 0) { wm_set_current_desktop(current_desktop - 1); key = 0; }
+        else if (key == KEY_RIGHT && current_desktop < DESKTOP_COUNT - 1) { wm_set_current_desktop(current_desktop + 1); key = 0; }
+    }
     if (key != 0) {
         if (gui_is_topbar_cfg_open()) { gui_handle_topbar_cfg_key(key); key = 0; }
         else if (gui_is_search_open()) { gui_handle_search_key(key); key = 0; }
@@ -340,24 +385,28 @@ done:
         if (focused_id >= 0) {
             wm_window_t* fw = find_window(focused_id);
             int has_scroll = fw && (fw->content_h > (fw->h - WM_TITLEBAR_H));
-            if (has_scroll && (keyboard_is_key_down(0x2A) || keyboard_is_key_down(0x36))) {
-                if (KEY_MATCH(key, KEY_UP)) { fw->view_y -= 40; key = 0; }
-                else if (KEY_MATCH(key, KEY_DOWN)) { fw->view_y += 40; key = 0; }
-                if (fw->view_y < 0) fw->view_y = 0;
-                int max_v = fw->content_h - (fw->h - WM_TITLEBAR_H);
-                if (fw->view_y > max_v) fw->view_y = (max_v > 0 ? max_v : 0);
-            }
+            /* Removed Shift+Up/Down scroll interception so apps can handle Shift+Arrow selection themselves */
         }
     }
 
     if (key && focused_id >= 0) { wm_window_t* fw = find_window(focused_id); if (fw && fw->on_key) fw->on_key(fw->id, key); }
+
+    /* Continuous mouse callback for drag operations (selection, scrollbar drag, etc.) */
+    if (focused_id >= 0) {
+        wm_window_t* fw = find_window(focused_id);
+        if (fw && fw->on_mouse) {
+            int rel_x = mx - fw->x;
+            int rel_y = my - (fw->y + WM_TITLEBAR_H);
+            fw->on_mouse(fw->id, rel_x, rel_y, mbtn);
+        }
+    }
 
     wm_window_t* sorted[WM_MAX_WINDOWS]; int count; get_sorted_windows(sorted, &count);
     for (int i = 0; i < count; i++) {
         render_window(sorted[i]);
         if (sorted[i]->flags & WM_FLAG_RESIZING) {
             draw_resize_grid(sorted[i]->x, sorted[i]->y, sorted[i]->w, sorted[i]->h,
-                           (get_personalization()->theme == 0) ? 0x6B7280 : 0x9CA3AF);
+                           theme_get_color(THEME_ROLE_SECONDARY));
         }
     }
     prev_mouse_btn = mbtn;
@@ -384,5 +433,46 @@ void* wm_get_app_data(int win_id) { wm_window_t* win = find_window(win_id); retu
 int wm_get_current_desktop(void) { return current_desktop; }
 
 void wm_set_current_desktop(int d) {
-    if (d >= 0 && d <= 4) current_desktop = d;
+    if (d < 0 || d >= DESKTOP_COUNT) return;
+
+    /* Track previous desktop for quick-switch */
+    if (d != current_desktop) desktop_prev[current_desktop] = d;
+
+    for (int i = 0; i < WM_MAX_WINDOWS; i++) {
+        if (windows[i].id == -1) continue;
+
+        if (windows[i].desktop == d) {
+            windows[i].flags |= WM_FLAG_VISIBLE;
+        } else {
+            windows[i].flags &= ~WM_FLAG_VISIBLE;
+            windows[i].flags &= ~WM_FLAG_FOCUSED;
+            windows[i].flags &= ~WM_FLAG_DRAGGING;
+            windows[i].flags &= ~WM_FLAG_RESIZING;
+        }
+    }
+
+    /* Focus topmost window on the new desktop */
+    focused_id = -1;
+    int best_z = -1;
+    for (int i = 0; i < WM_MAX_WINDOWS; i++) {
+        if ((windows[i].flags & WM_FLAG_VISIBLE) && windows[i].desktop == d) {
+            if (windows[i].z_order > best_z) {
+                best_z = windows[i].z_order;
+                focused_id = windows[i].id;
+            }
+        }
+    }
+    if (focused_id >= 0) {
+        for (int i = 0; i < WM_MAX_WINDOWS; i++) {
+            if (windows[i].id == focused_id) {
+                windows[i].flags |= WM_FLAG_FOCUSED;
+                break;
+            }
+        }
+    }
+    current_desktop = d;
+}
+
+int wm_get_previous_desktop(void) {
+    return desktop_prev[current_desktop];
 }

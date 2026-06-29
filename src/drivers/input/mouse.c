@@ -19,7 +19,11 @@ static int bound_y = 768;
 
 // PS/2 mouse packet state machine
 static volatile int mouse_cycle = 0;
-static volatile uint8_t mouse_packet[3];
+static volatile uint8_t mouse_packet[4];
+
+// Scroll state
+static volatile int mouse_scroll_delta = 0;
+static int mouse_intellimouse = 0;
 
 // ── I/O delay for hardware compatibility ────────────────────
 static void io_delay(void) {
@@ -154,6 +158,75 @@ void init_mouse(void) {
     }
 
     mouse_cycle = 0;
+
+    // Try to enable IntelliMouse scroll-wheel extension (best-effort)
+    mouse_wait_input();
+    port_byte_out(0x64, 0xD4);
+    io_delay();
+    mouse_wait_input();
+    port_byte_out(0x60, 0xF5); // Disable streaming during rate change
+    mouse_wait_output();
+    port_byte_in(0x60);
+    mouse_wait_input();
+    port_byte_out(0x64, 0xD4);
+    io_delay();
+    mouse_wait_input();
+    port_byte_out(0x60, 0xF3); // Set sample rate
+    mouse_wait_output();
+    port_byte_in(0x60);
+    mouse_wait_input();
+    port_byte_out(0x64, 0xD4);
+    io_delay();
+    mouse_wait_input();
+    port_byte_out(0x60, 0xC8); // 200
+    mouse_wait_output();
+    port_byte_in(0x60);
+    mouse_wait_input();
+    port_byte_out(0x64, 0xD4);
+    io_delay();
+    mouse_wait_input();
+    port_byte_out(0x60, 0xF3); // Set sample rate
+    mouse_wait_output();
+    port_byte_in(0x60);
+    mouse_wait_input();
+    port_byte_out(0x64, 0xD4);
+    io_delay();
+    mouse_wait_input();
+    port_byte_out(0x60, 0x64); // 100
+    mouse_wait_output();
+    port_byte_in(0x60);
+    mouse_wait_input();
+    port_byte_out(0x64, 0xD4);
+    io_delay();
+    mouse_wait_input();
+    port_byte_out(0x60, 0xF3); // Set sample rate
+    mouse_wait_output();
+    port_byte_in(0x60);
+    mouse_wait_input();
+    port_byte_out(0x64, 0xD4);
+    io_delay();
+    mouse_wait_input();
+    port_byte_out(0x60, 0x50); // 80
+    mouse_wait_output();
+    port_byte_in(0x60);
+    mouse_wait_input();
+    port_byte_out(0x64, 0xD4);
+    io_delay();
+    mouse_wait_input();
+    port_byte_out(0x60, 0xF2); // Get ID
+    mouse_wait_output();
+    {
+        unsigned char mid = (unsigned char)port_byte_in(0x60);
+        if (mid == 0x03 || mid == 0x04) mouse_intellimouse = 1;
+    }
+    mouse_wait_input();
+    port_byte_out(0x64, 0xD4);
+    io_delay();
+    mouse_wait_input();
+    port_byte_out(0x60, 0xF4); // Enable streaming
+    mouse_wait_output();
+    port_byte_in(0x60);
+    while (port_byte_in(0x64) & 1) port_byte_in(0x60);
 }
 
 // Mouse sensitivity: 1=low, 2=normal, 3=high
@@ -195,10 +268,11 @@ void mouse_handler(void) {
         case 2:
             // Third byte: Y movement
             mouse_packet[2] = data;
-            mouse_cycle = 0;
-
             // Check for overflow — discard packet if overflow
-            if (mouse_packet[0] & 0xC0) break;
+            if (mouse_packet[0] & 0xC0) {
+                mouse_cycle = 0;
+                break;
+            }
 
             // Parse buttons
             mouse_buttons = mouse_packet[0] & 0x07;
@@ -231,6 +305,22 @@ void mouse_handler(void) {
             if (mouse_y >= bound_y) mouse_y = bound_y - 1;
 
             mouse_updated = 1;
+
+            if (mouse_intellimouse) {
+                mouse_cycle = 3;
+                break;
+            }
+            mouse_cycle = 0;
+            break;
+
+        case 3:
+            // Fourth byte: Z/scroll movement (IntelliMouse / IntelliMouse Explorer)
+            mouse_packet[3] = data;
+            {
+                int z = (int)((int8_t)mouse_packet[3]);
+                if (z != 0) mouse_scroll_delta += z;
+            }
+            mouse_cycle = 0;
             break;
     }
 }
@@ -304,8 +394,9 @@ void mouse_draw_cursor(void) {
 }
 
 int mouse_get_wheel_delta(void) {
-    return 0;
+    return mouse_scroll_delta;
 }
 
 void mouse_clear_wheel_delta(void) {
+    mouse_scroll_delta = 0;
 }

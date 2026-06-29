@@ -1,6 +1,7 @@
 #include "kernel/arch/x86_64/idt.h"
 #include "drivers/input/keyboard.h"
 #include "drivers/video/framebuffer.h"
+#include "kernel/task/task.h"
 
 idt_entry_t idt[IDT_ENTRIES];
 idt_ptr_t idt_ptr;
@@ -33,13 +34,33 @@ void set_idt_entry(int num, uint64_t base, uint16_t sel, uint8_t flags) {
     idt[num].zero = 0;
 }
 
+static void dump_hex(uint64_t val) {
+    char hex[20];
+    const char* hex_chars = "0123456789ABCDEF";
+    for (int i = 0; i < 16; i++) hex[15-i] = hex_chars[(val >> (i * 4)) & 0x0F];
+    hex[16] = 0;
+    print_string(hex);
+}
+
 void core_exception_handler(uint64_t* registers) {
     uint64_t isr_num = registers[15];
     uint64_t err_code = registers[16];
+    char buf[32];
+
+    {
+        task_t* cur_task = get_current_task();
+        if (cur_task) {
+            print_string("\n  Task: ");
+            print_string(cur_task->name);
+            print_string(" (id=");
+            itoa(cur_task->id, buf);
+            print_string(buf);
+            print_string(")\n");
+        }
+    }
     
-//    serial_puts("\n[BEDI] CPU EXCEPTION: ");
-    char buf[16]; itoa(isr_num, buf);
-    print_string("\n  !!! CPU CRITICAL FAULT: ");
+    itoa(isr_num, buf);
+    print_string("  !!! CPU CRITICAL FAULT: ");
     print_string(buf);
     print_string(" !!!\n");
 
@@ -48,11 +69,8 @@ void core_exception_handler(uint64_t* registers) {
         __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
         print_string("  Page Fault at: 0x");
         char hex[20];
-        // Simple hex conversion
         const char* hex_chars = "0123456789ABCDEF";
-        for (int i = 0; i < 16; i++) {
-            hex[15-i] = hex_chars[(cr2 >> (i * 4)) & 0x0F];
-        }
+        for (int i = 0; i < 16; i++) hex[15-i] = hex_chars[(cr2 >> (i * 4)) & 0x0F];
         hex[16] = 0;
         print_string(hex);
         print_string("\n  Error Code: ");

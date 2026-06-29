@@ -16,8 +16,11 @@
 #include "gui/wallpaper_raw.h"
 #include "drivers/audio/audio.h"
 #include "kernel/lib/string.h"
+#include "kernel/task/task.h"
+#include <gfx/splash_bmp.h>
 
 extern volatile uint64_t timer_ticks;
+extern void serial_puts(const char* s);
 
 #define WALLPAPER_CACHE_W 1920
 #define WALLPAPER_CACHE_H 1080
@@ -29,11 +32,13 @@ extern void calculator(void);
 extern void file_explorer(void);
 extern void terminal_app(void);
 extern void pci_scanner_app(void);
+extern void personalization_app(void);
 extern void system_app(void);
 extern void text_editor(void);
-extern void cube_3d_app(void);
+extern void bdim_new(void);
+extern void bdim_open(const char* name);
 extern void mandelbrot_app(void);
-extern void bdrowser(void);
+extern void httpviewer(void);
 extern void calendar_app(void);
 extern void process_viewer_app(void);
 extern void piano_app(void);
@@ -44,13 +49,24 @@ extern void tetris_app(void);
 extern void pairs_app(void);
 extern void osk_app(void);
 extern void imgview_app(void);
-extern void weather_app(void);
+extern void imgview_open(const char* name);
 extern void game_2048_app(void);
 extern void flappy_app(void);
 extern void sudoku_app(void);
+extern void bitmap_maker_app(void);
+extern void hexdump_app(void);
+extern void hexdump_open(const char* name);
+extern void save_dialog_open(const char* default_name, void (*callback)(const char*));
+extern void perfmon_app(void);
+extern void kernellog_app(void);
+extern void netdebug_app(void);
+extern void graphing_app(void);
+
+extern const unsigned char bedi_banner_bmp[];
+extern const unsigned int bedi_banner_bmp_len;
 
 #define START_MENU_W 340
-#define MENU_ITEM_H 40
+#define MENU_ITEM_H 28
 #define DESKTOP_COUNT 5
 #define APP_DOCK_ICON_SIZE 24
 #define APP_DOCK_GAP 4
@@ -64,6 +80,7 @@ static int prev_mouse_btn = 0;
 static int all_apps_panel_open = 0;
 static int all_apps_scroll = 0;
 static int all_apps_hover_idx = -1;
+static int menu_scroll = 0;
 static int app_dock_hover_idx = -1;
 static int app_dock_right_click_idx = -1;
 
@@ -75,7 +92,7 @@ static int search_sel = 0;
 static int search_open = 0;
 
 #define MAX_PINNED_APPS 10
-#define MAX_ALL_APPS 23
+#define MAX_ALL_APPS 32
 #define DESKTOP_COUNT 5
 
 typedef struct {
@@ -88,11 +105,11 @@ static app_entry_t all_apps[MAX_ALL_APPS] = {
     {"Calculator", calculator, 1},
     {"File Explorer", file_explorer, 1},
     {"Text Editor", text_editor, 1},
-    {"Bdrowser", bdrowser, 1},
+    {"BDIM", bdim_new, 1},
+    {"HTTP Viewer", httpviewer, 1},
     {"Calendar", calendar_app, 1},
     {"Process Viewer", process_viewer_app, 0},
     {"Clock", clock_app, 1},
-    {"Weather", weather_app, 1},
     {"Piano", piano_app, 0},
     {"Snake", snake_app, 0},
     {"Mines", mines_app, 0},
@@ -101,12 +118,17 @@ static app_entry_t all_apps[MAX_ALL_APPS] = {
     {"On-Screen Keyboard", osk_app, 0},
     {"Image Viewer", imgview_app, 0},
     {"PCI Scanner", pci_scanner_app, 0},
+    {"Personalization", personalization_app, 0},
     {"System", system_app, 0},
     {"Terminal", terminal_app, 1},
-    {"Cube 3D", cube_3d_app, 0},
     {"2048", game_2048_app, 0},
     {"Flappy Bird", flappy_app, 0},
     {"Sudoku", sudoku_app, 0},
+    {"Hex Viewer", hexdump_app, 0},
+    {"Graphing Calculator", graphing_app, 0},
+    {"Network Debug", netdebug_app, 0},
+    {"Performance", perfmon_app, 0},
+    {"Kernel Log", kernellog_app, 0},
     {0, 0, 0}
 };
 
@@ -114,45 +136,30 @@ static int point_in_rect(int px, int py, int rx, int ry, int rw, int rh) {
     return (px >= rx && px <= rx + rw && py >= ry && py <= ry + rh);
 }
 
-static personalization_t prefs = {
-    .accent_color_idx = 0,
-    .clock_24h = 1,
-    .mouse_sensitivity = 2,
-    .theme = 0,
-    .anim_speed = 2,
-    .font_shadow = 1,
-    .window_transparency = 230,
-    .compact_mode = 0,
-    .system_volume = 80,
-};
-
-personalization_t* get_personalization(void) { return &prefs; }
-
-static const uint32_t dark_palette[] = {
-    0x0D0E12, 0x15171D, 0x1D1F26, 0x262830, 0x383B44, 0x4D5059,
-    0xE4E6EA, 0x94979F, 0x6D7079, 0x4A4D56, 0x0B0C10, 0xE4E6EA,
-    0x15171D, 0x000000
-};
-
-static const uint32_t light_palette[] = {
-    0xF8F9FA, 0xFFFFFF, 0xF1F3F4, 0xE8EAED, 0xDADCE0, 0xBDC1C6,
-    0x202124, 0x5F6368, 0x80868B, 0x9AA0A6, 0xE8E8E8, 0x1A73E8,
-    0xF0F0F0, 0x000000
-};
+extern personalization_t* get_personalization(void);
+extern uint32_t theme_get_color(theme_role_t role);
+extern uint32_t get_accent_color(void);
+extern void theme_init(void);
 
 uint32_t get_theme_color(int id) {
-    if (prefs.theme == 1) return light_palette[id];
-    return dark_palette[id];
-}
-
-uint32_t get_accent_color(void) {
-    static const uint32_t accent_colors[] = {
-        0x8AB4F8, 0x81C995, 0xC58AF9, 0x78D9EC, 0xF28B82, 0xF2CC8C,
-        0x669DF6, 0x5BB974, 0xAF5CF7, 0x4ECDC4, 0xE8EAED, 0x9AA0A6
+    static const uint32_t legacy_map[] = {
+        THEME_ROLE_PRIMARY,
+        THEME_ROLE_ON_PRIMARY,
+        THEME_ROLE_SECONDARY,
+        THEME_ROLE_ON_SECONDARY,
+        THEME_ROLE_TERTIARY,
+        THEME_ROLE_ERROR,
+        THEME_ROLE_PRIMARY,
+        THEME_ROLE_ON_PRIMARY,
+        THEME_ROLE_SECONDARY,
+        THEME_ROLE_ON_SECONDARY,
+        THEME_ROLE_SURFACE,
+        THEME_ROLE_PRIMARY,
+        THEME_ROLE_SURFACE,
+        THEME_ROLE_BACKGROUND,
     };
-    if ((size_t)prefs.accent_color_idx < sizeof(accent_colors)/sizeof(accent_colors[0]))
-        return accent_colors[prefs.accent_color_idx];
-    return accent_colors[0];
+    if (id < 0 || id >= (int)(sizeof(legacy_map)/sizeof(legacy_map[0]))) return 0xFF0000;
+    return theme_get_color(legacy_map[id]);
 }
 
 void gui_system_shutdown() {
@@ -165,61 +172,65 @@ void gui_system_shutdown() {
     while(1) { __asm__ volatile("hlt"); }
 }
 
-static const char* main_menu[] = { "Applications", "System Tools", "Games", "Accessibility", "Graphics", "Demo", "Terminal", "Shutdown" };
-#define MAIN_MENU_COUNT 8
-static const char* apps_menu[] = { "Calculator", "File Explorer", "Text Editor", "Bdrowser", "Calendar", "Process Viewer", "Clock", "Weather" };
-#define APPS_MENU_COUNT 8
-static const char* system_menu[] = { "PCI Scanner", "System" };
-#define SYSTEM_MENU_COUNT 2
+static const char* main_menu[] = { "Applications", "System Tools", "Games", "Accessibility", "Graphics", "Debug", "Demo", "Terminal", "Shutdown" };
+#define MAIN_MENU_COUNT 9
+static const char* apps_menu[] = { "Calculator", "File Explorer", "Text Editor", "HTTP Viewer", "Calendar", "Process Viewer", "Clock", "Image Viewer", "Bitmap Maker", "Hex Viewer" };
+#define APPS_MENU_COUNT 10
+static const char* system_menu[] = { "PCI Scanner", "Personalization", "System" };
+#define SYSTEM_MENU_COUNT 3
 static const char* games_menu[] = { "Piano", "Snake", "Mines", "Tetris", "Pairs", "2048", "Flappy Bird", "Sudoku" };
 #define GAMES_MENU_COUNT 8
-static const char* demo_menu[] = { "Teacup", "Mandelbrot" };
-#define DEMO_MENU_COUNT 2
+static const char* demo_menu[] = { "Mandelbrot" };
+#define DEMO_MENU_COUNT 1
 static const char* accessibility_menu[] = { "On-Screen Keyboard" };
 #define ACCESSIBILITY_MENU_COUNT 1
-static const char* graphics_menu[] = { "Image Viewer" };
-#define GRAPHICS_MENU_COUNT 1
+static const char* graphics_menu[] = { "Image Viewer", "Graphing Calculator" };
+#define GRAPHICS_MENU_COUNT 2
+static const char* debug_menu[] = { "Performance", "Kernel Log", "Network Debug" };
+#define DEBUG_MENU_COUNT 3
 
-static const char* all_items[] = { "Calculator", "File Explorer", "PCI Scanner", "System App", "Text Editor", "Teacup", "Mandelbrot", "Terminal", "Process Viewer", "Bdrowser", "Calendar", "Weather", "Piano", "Snake", "Mines", "Clock", "Tetris", "Pairs", "2048", "Flappy Bird", "On-Screen Keyboard", "Image Viewer", "Sudoku", 0 };
+static const char* all_items[] = { "Calculator", "File Explorer", "PCI Scanner", "Personalization", "System App", "Text Editor", "Mandelbrot", "Hex Viewer", "Terminal", "Process Viewer", "HTTP Viewer", "Calendar", "Piano", "Snake", "Mines", "Clock", "Tetris", "Pairs", "2048", "Flappy Bird", "On-Screen Keyboard", "Image Viewer", "Bitmap Maker", "Sudoku", "Graphing Calculator", "Network Debug", "Performance", "Kernel Log", 0 };
 
 void draw_premium_wallpaper() {
     uint32_t fw = get_fb_width(), fh = get_fb_height();
     if (fw == 0 || fh == 0) return;
 
-    const unsigned char* rgb = vans_24bit_rgb;
-    int iw = VANS_24BIT_RGB_WIDTH;
-    int ih = VANS_24BIT_RGB_HEIGHT;
     uint32_t stride = gfx_get_stride();
     uint32_t* bb = gfx_get_back_buffer();
 
-    int draw_h = (int)fh;
-    int bot_offset = TASKBAR_H;
-    int avail = draw_h - bot_offset;
-    if (avail < 10) avail = 10;
+    /* Theme-aware desktop background */
+    personalization_t* p = get_personalization();
+    uint32_t bg = theme_get_color(THEME_ROLE_BACKGROUND);
 
-    if ((int)fw != wallpaper_cached_w || (int)fh != wallpaper_cached_h) {
-        wallpaper_cached_w = fw;
-        wallpaper_cached_h = fh;
-        for (int row = 0; row < avail; row++) {
-            uint32_t* dst_row = wallpaper_cache + row * WALLPAPER_CACHE_W;
-            int sy = (row * ih) / avail;
-            if (sy < 0) sy = 0;
-            if (sy >= ih) sy = ih - 1;
-            for (int col = 0; col < (int)fw; col++) {
-                int sx = (col * iw) / (int)fw;
-                if (sx < 0) sx = 0;
-                if (sx >= iw) sx = iw - 1;
-                int idx = (sy * iw + sx) * 3;
-                uint32_t r = rgb[idx];
-                uint32_t g = rgb[idx + 1];
-                uint32_t b = rgb[idx + 2];
-                dst_row[col] = gfx_rgb_to_pixel(RGB(r, g, b));
+    /* Fill base */
+    for (uint32_t i = 0; i < stride * fh; i++) bb[i] = bg;
+
+    /* Render pattern */
+    if (p->bg_pattern > 0) {
+        uint32_t dark = gfx_darken(bg, 18);
+        int s = p->bg_pattern_size > 0 ? p->bg_pattern_size : 1;
+        for (uint32_t py = 0; py < fh; py++) {
+            for (uint32_t px = 0; px < fw; px++) {
+                uint32_t idx = py * stride + px;
+                uint32_t c = bg;
+                int xs = (int)(px / s);
+                int ys = (int)(py / s);
+                switch (p->bg_pattern) {
+                    case 1: if (xs % 8 == 0 || ys % 8 == 0) c = dark; break;
+                    case 2: if ((xs % 12) < 2 && (ys % 12) < 2) c = dark; break;
+                    case 3: if (((xs + ys) % 16) < 2 || ((xs - ys + 100) % 16) < 2) c = dark; break;
+                    case 4: if ((xs % 10) < 1 || (ys % 10) < 1) c = dark; break;
+                    case 5: c = gfx_darken(bg, ((xs + ys * 2) * 7 % 25) - 12); break;
+                    case 6: if (((xs + ys * 3) % 20) < 2) c = dark; break;
+                    case 7: if (((xs / 10) + (ys / 10)) % 2) c = dark; break;
+                    case 8: if ((xs % 24) < 2 || (((xs + 12) % 24) < 2 && (ys % 14) < 7)) c = dark; break;
+                    case 9: if (ys % 8 == 0 || (ys % 16 < 8 ? xs % 20 == 0 : (xs + 10) % 20 == 0)) c = dark; break;
+                    case 10: if ((xs + ys) % 14 < 2) c = dark; break;
+                    case 11: if (xs % 14 == 0) c = dark; break;
+                }
+                bb[idx] = c;
             }
         }
-    }
-
-    for (int row = 0; row < avail; row++) {
-        memcpy(bb + row * stride, wallpaper_cache + row * WALLPAPER_CACHE_W, fw * sizeof(uint32_t));
     }
 }
 
@@ -228,13 +239,14 @@ void draw_taskbar() {
     if (fw == 0 || fh == 0) return;
     int taskbar_h = TASKBAR_H, taskbar_y = fh - taskbar_h;
     personalization_t* p = get_personalization();
-    uint32_t bg_clr = (p->theme == 0) ? 0x0F1115 : 0xF3F4F6;
-    uint32_t text_clr = (p->theme == 0) ? 0xE4E6EA : 0x1F2937;
-    uint32_t muted = (p->theme == 0) ? 0x6D7079 : 0x9CA3AF;
-    uint32_t border = (p->theme == 0) ? 0x2A2D35 : 0xD1D5DB;
-    uint32_t tab_active = (p->theme == 0) ? 0x2C303A : 0xE5E7EB;
-    uint32_t tab_inactive = (p->theme == 0) ? 0x1A1D24 : 0xEAECF0;
-    uint32_t tray_bg = (p->theme == 0) ? 0x0A0C10 : 0xEAEBEE;
+    uint32_t bg_clr       = theme_get_color(THEME_ROLE_TASKBAR_BG);
+    uint32_t text_clr     = theme_get_color(THEME_ROLE_TASKBAR_TEXT);
+    uint32_t muted        = theme_get_color(THEME_ROLE_DISABLED);
+    uint32_t border       = theme_get_color(THEME_ROLE_OUTLINE);
+    uint32_t tab_active   = theme_get_color(THEME_ROLE_MENU_ITEM_SELECTED);
+    uint32_t tab_inactive = theme_get_color(THEME_ROLE_MENU_ITEM_HOVER);
+    uint32_t tray_bg      = theme_get_color(THEME_ROLE_SURFACE_VARIANT);
+    uint32_t accent       = get_accent_color();
     int mx = mouse_get_x(), my = mouse_get_y();
     int margin = 8, gap = 4;
 
@@ -242,24 +254,17 @@ void draw_taskbar() {
     gfx_fill_rect(0, taskbar_y, fw, taskbar_h, bg_clr);
     gfx_draw_hline(0, taskbar_y, fw, border);
 
-    /* Left: Start button */
-    int start_btn_w = 48;
+    /* Left: B logo small banner */
+    int start_btn_w = 28;
     int start_x = margin;
-    int start_hover = point_in_rect(mx, my, start_x, taskbar_y + 4, start_btn_w, taskbar_h - 8);
-    if (start_hover || g_st >= 2) {
-        gfx_fill_rect_rounded(start_x, taskbar_y + 4, start_btn_w, taskbar_h - 8, 6, (p->theme == 0) ? 0x1F2229 : 0xE5E7EB);
-        gfx_draw_rect_rounded_outline(start_x, taskbar_y + 4, start_btn_w, taskbar_h - 8, 6, 1, border);
-    } else {
-        gfx_draw_rect_rounded_outline(start_x, taskbar_y + 4, start_btn_w, taskbar_h - 8, 6, 1, border);
-    }
-    draw_start_icon(start_x + 8, taskbar_y + 8, start_btn_w - 16, taskbar_h - 16);
+    draw_bmp_black_transparent(start_x, taskbar_y + 2, bedi_logo_bmp, bedi_logo_bmp_len, gfx_get_back_buffer(), gfx_get_stride(), fw, fh, 0, 0, 28, 28);
 
     /* Search */
     int search_btn_w = 36;
     int search_x = start_x + start_btn_w + gap;
     int search_hover = point_in_rect(mx, my, search_x, taskbar_y + 4, search_btn_w, taskbar_h - 8);
     if (search_hover || search_open) {
-        gfx_fill_rect_rounded(search_x, taskbar_y + 4, search_btn_w, taskbar_h - 8, 6, (p->theme == 0) ? 0x1F2229 : 0xE5E7EB);
+        gfx_fill_rect_rounded(search_x, taskbar_y + 4, search_btn_w, taskbar_h - 8, 6, theme_get_color(THEME_ROLE_BUTTON_HOVER));
         gfx_draw_rect_rounded_outline(search_x, taskbar_y + 4, search_btn_w, taskbar_h - 8, 6, 1, border);
     } else {
         gfx_draw_rect_rounded_outline(search_x, taskbar_y + 4, search_btn_w, taskbar_h - 8, 6, 1, border);
@@ -271,28 +276,30 @@ void draw_taskbar() {
     gfx_draw_vline(sep1_x, taskbar_y + 8, taskbar_h - 16, border);
 
     /* Desktop switcher (always visible, left of tabs) */
-    int desk_w = 28, desk_h = 22, desk_gap = 4;
+    int desk_w = 36, desk_h = 26, desk_gap = 4;
     int desk_area_w = DESKTOP_COUNT * (desk_w + desk_gap) - desk_gap;
     int desk_area_x = sep1_x + gap + 4;
     int desk_start_x = desk_area_x;
+    int prev_desk = wm_get_previous_desktop();
     for (int i = 0; i < DESKTOP_COUNT; i++) {
         int dx = desk_start_x + i * (desk_w + desk_gap);
-        int dy = taskbar_y + 4;
+        int dy = taskbar_y + 3;
         int hover = point_in_rect(mx, my, dx, dy, desk_w, desk_h);
         int is_current = (i == wm_get_current_desktop());
-        uint32_t box_bg = is_current ? tab_active : (hover ? border : (p->theme == 0 ? 0x16181E : 0xE5E7EB));
+        int is_prev = (i == prev_desk && prev_desk != wm_get_current_desktop());
+        uint32_t box_bg = is_current ? tab_active : (hover || is_prev ? border : theme_get_color(THEME_ROLE_BUTTON_BG));
         uint32_t txt_clr = is_current ? text_clr : muted;
         gfx_fill_rect_rounded(dx, dy, desk_w, desk_h, 4, box_bg);
         gfx_draw_rect_rounded_outline(dx, dy, desk_w, desk_h, 4, 1, border);
         char num[2];
         num[0] = '1' + i;
         num[1] = 0;
-        gfx_draw_string_transparent(dx + 8, dy + 3, num, txt_clr);
+        gfx_draw_string_transparent(dx + 10, dy + 5, num, txt_clr);
     }
 
     /* Middle: window tabs */
     int tab_area_x = desk_area_x + desk_area_w + gap + 4;
-    int right_reserved = 150 + 8; /* tray + gap */
+    int right_reserved = 170 + 8; /* tray + gap */
     int tab_area_w = fw - tab_area_x - right_reserved;
     if (tab_area_w < 100) tab_area_w = 100;
 
@@ -332,42 +339,65 @@ void draw_taskbar() {
         wx += tab_w + gap + 2;
     }
 
-    /* Right: volume grid square + clock tray */
-    int tray_w = 80;
+    /* Right: volume slider + clock tray */
+    int tray_w = 170;
     int tray_x = fw - tray_w - margin;
     gfx_fill_rect(tray_x, taskbar_y, tray_w, taskbar_h, tray_bg);
 
     int vol = audio_get_master_volume();
-    int vol_x = tray_x + 10;
-    int vol_y = taskbar_y + (taskbar_h - 14) / 2;
     int mbtn = mouse_get_buttons();
-    uint32_t vol_clr = audio_is_muted() ? 0xEF4444 : text_clr;
-    uint32_t vol_empty = (p->theme == 0) ? 0x4D5059 : 0xBDC1C6;
+    uint32_t vol_clr = audio_is_muted() ? theme_get_color(THEME_ROLE_ERROR) : accent;
+    uint32_t track_bg = 0x30363D;
 
-    /* Small 14x14 grid square */
-    int gx = vol_x, gy = vol_y, gw = 14, gh = 14;
-    gfx_draw_rect_outline(gx, gy, gw, gh, 1, border);
-    int cell = 4, cg = 1;
-    int filled = (vol * 9 + 50) / 100;
-    for (int r = 0; r < 3; r++) {
-        for (int c = 0; c < 3; c++) {
-            int idx = r * 3 + c;
-            int cx = gx + 2 + c * (cell + cg);
-            int cy = gy + 2 + (2 - r) * (cell + cg); // fill from bottom
-            if (idx < filled) {
-                gfx_fill_rect(cx, cy, cell, cell, vol_clr);
-            } else {
-                gfx_fill_rect(cx, cy, cell, cell, vol_empty);
-            }
-        }
+    /* Speaker icon area */
+    int spk_x = tray_x + 8;
+    int spk_y = taskbar_y + (taskbar_h - 14) / 2;
+    gfx_fill_rect(spk_x + 2, spk_y + 5, 4, 4, text_clr);
+    gfx_fill_rect(spk_x + 6, spk_y + 3, 3, 8, text_clr);
+    gfx_fill_rect(spk_x + 9, spk_y + 1, 2, 12, text_clr);
+    gfx_fill_rect(spk_x + 11, spk_y, 3, 14, text_clr);
+
+    /* Slider track */
+    int track_x = spk_x + 18;
+    int track_y = taskbar_y + (taskbar_h - 6) / 2;
+    int track_w = 72;
+    int track_h = 6;
+    gfx_fill_rect(track_x, track_y, track_w, track_h, track_bg);
+
+    /* Filled portion */
+    int fill_w = (vol * track_w) / 100;
+    if (fill_w > 0) {
+        gfx_fill_rect(track_x, track_y, fill_w, track_h, vol_clr);
     }
-    int vol_hover = point_in_rect(mx, my, gx, gy, gw, gh);
-    if (vol_hover && (mbtn & 1)) {
-        int rel = mx - gx;
+
+    /* Thumb */
+    int thumb_x = track_x + fill_w - 6;
+    if (thumb_x < track_x - 2) thumb_x = track_x - 2;
+    if (thumb_x > track_x + track_w - 10) thumb_x = track_x + track_w - 10;
+    int thumb_y = track_y - 3;
+    gfx_fill_rect(thumb_x, thumb_y, 12, 12, text_clr);
+    gfx_draw_rect_outline(thumb_x, thumb_y, 12, 12, 1, vol_clr);
+
+    /* Drag support */
+    if (mbtn & 1) {
+        int rel = mx - track_x;
         if (rel < 0) rel = 0;
-        if (rel > gw) rel = gw;
-        audio_set_master_volume((rel * 100) / gw);
+        if (rel > track_w) rel = track_w;
+        audio_set_master_volume((rel * 100) / track_w);
     }
+
+    /* Volume text */
+    char vol_txt[8];
+    int vi = 0, vt = vol;
+    if (vt == 0) { vol_txt[0] = '0'; vi = 1; }
+    else {
+        int d = 0, p2 = vt;
+        while (p2 > 0) { d++; p2 /= 10; }
+        vi = d;
+        while (vt > 0) { vol_txt[--vi] = '0' + (vt % 10); vt /= 10; }
+    }
+    vol_txt[vi] = 0;
+    gfx_draw_string_transparent(track_x + track_w + 6, taskbar_y + 10, vol_txt, text_clr);
 
     /* Clock */
     time_t t; get_time(&t);
@@ -385,13 +415,13 @@ void draw_taskbar() {
         t_str[5] = ' '; t_str[6] = (t.hour < 12) ? 'A' : 'P'; t_str[7] = 'M'; t_str[8] = 0;
     }
     int clock_w = gfx_strlen(t_str) * 8;
-    gfx_draw_string_transparent(tray_x + tray_w - clock_w - 6, taskbar_y + 12, t_str, text_clr);
+    gfx_draw_string_transparent(tray_x + tray_w - clock_w - 6, taskbar_y + 10, t_str, text_clr);
 }
 
 static void get_menu_geometry(int* mx, int* my, int* mw, int* mh, int* ic) {
     uint32_t fw = get_fb_width(), fh = get_fb_height();
     *mw = 340; *mx = 8;
-    int header_h = 56, footer_h = 6;
+    int header_h = 36, footer_h = 6;
     if (g_st == 2) *ic = MAIN_MENU_COUNT;
     else if (g_st == 3) *ic = APPS_MENU_COUNT;
     else if (g_st == 5) *ic = SYSTEM_MENU_COUNT;
@@ -399,6 +429,7 @@ static void get_menu_geometry(int* mx, int* my, int* mw, int* mh, int* ic) {
     else if (g_st == 7) *ic = GAMES_MENU_COUNT;
     else if (g_st == 9) *ic = ACCESSIBILITY_MENU_COUNT;
     else if (g_st == 11) *ic = GRAPHICS_MENU_COUNT;
+    else if (g_st == 13) *ic = DEBUG_MENU_COUNT;
     else *ic = 0;
 
     int content_h = *ic * (MENU_ITEM_H - 4);
@@ -409,13 +440,15 @@ static void get_menu_geometry(int* mx, int* my, int* mw, int* mh, int* ic) {
 
 static void render_menu() {
     int mx, my, mw, mh, ic; get_menu_geometry(&mx, &my, &mw, &mh, &ic);
+    uint32_t fw = get_fb_width(), fh = get_fb_height();
     personalization_t* p = get_personalization();
-    uint32_t bg_main = (p->theme == 0) ? 0x131519 : 0xF9FAFB;
-    uint32_t text_clr = (p->theme == 0) ? 0xE4E6EA : 0x111827;
-    uint32_t head_bg  = (p->theme == 0) ? 0x1A1D24 : 0xFFFFFF;
-    uint32_t sel_bg   = (p->theme == 0) ? 0x252830 : 0xF3F4F6;
-    uint32_t muted    = (p->theme == 0) ? 0x8B8F99 : 0x6B7280;
-    uint32_t border   = (p->theme == 0) ? 0x2C303A : 0xE5E7EB;
+    uint32_t bg_main = theme_get_color(THEME_ROLE_MENU_BG);
+    uint32_t text_clr = theme_get_color(THEME_ROLE_PRIMARY);
+    uint32_t head_bg  = theme_get_color(THEME_ROLE_SURFACE_VARIANT);
+    uint32_t sel_bg   = theme_get_color(THEME_ROLE_MENU_ITEM_SELECTED);
+    uint32_t hover_bg = theme_get_color(THEME_ROLE_MENU_ITEM_HOVER);
+    uint32_t muted    = theme_get_color(THEME_ROLE_SECONDARY);
+    uint32_t border   = theme_get_color(THEME_ROLE_OUTLINE);
     uint32_t accent   = get_accent_color();
     int mx_mouse = mouse_get_x(), my_mouse = mouse_get_y();
 
@@ -425,40 +458,41 @@ static void render_menu() {
     gfx_draw_rect_outline(mx, my, mw, mh, 1, border);
 
     /* Header */
-    int header_h = 52;
-    gfx_fill_rect(mx + 1, my + 1, mw - 2, header_h, head_bg);
-    gfx_draw_hline(mx + 16, my + header_h, mw - 32, border);
-
-    /* Logo / back indicator in header */
-    if (g_st == 2) {
-        draw_start_icon(mx + 10, my + 10, 28, 28);
-        gfx_draw_string_transparent(mx + 46, my + 18, "BEDI OS", text_clr);
-    } else {
-        /* Back button */
-        int back_x = mx + 8, back_y = my + 14, back_w = 28, back_h = 24;
+    int header_h = 36;
+    if (g_st > 2) {
+        int back_x = mx + 8, back_y = my + 6, back_w = 28, back_h = 24;
         int back_hover = point_in_rect(mx_mouse, my_mouse, back_x, back_y, back_w, back_h);
         if (back_hover) {
-            gfx_fill_rect(back_x, back_y, back_w, back_h, (p->theme == 0) ? 0x262E38 : 0xE5E7EB);
+            gfx_fill_rect_rounded(back_x, back_y, back_w, back_h, 6, theme_get_color(THEME_ROLE_BUTTON_HOVER));
         }
-        gfx_draw_rect_outline(back_x, back_y, back_w, back_h, 1, border);
+        gfx_draw_rect_rounded_outline(back_x, back_y, back_w, back_h, 6, 1, border);
         gfx_draw_string_transparent(back_x + 8, back_y + 6, "<", text_clr);
 
-        const char* sub = (g_st == 3) ? "Applications" : (g_st == 5) ? "System Tools" : (g_st == 7) ? "Games" : (g_st == 9) ? "Accessibility" : (g_st == 11) ? "Graphics" : "Demo";
-        gfx_draw_string_transparent(mx + 44, my + 18, sub, text_clr);
+        const char* sub = (g_st == 3) ? "Applications" : (g_st == 5) ? "System Tools" : (g_st == 7) ? "Games" : (g_st == 9) ? "Accessibility" : (g_st == 11) ? "Graphics" : (g_st == 13) ? "Debug" : "Demo";
+        gfx_draw_string_transparent(mx + 44, my + 10, sub, text_clr);
     }
 
-    const char** items = (g_st == 2) ? main_menu : (g_st == 3) ? apps_menu : (g_st == 5) ? system_menu : (g_st == 7) ? games_menu : (g_st == 9) ? accessibility_menu : (g_st == 11) ? graphics_menu : demo_menu;
+    const char** items = (g_st == 2) ? main_menu : (g_st == 3) ? apps_menu : (g_st == 5) ? system_menu : (g_st == 7) ? games_menu : (g_st == 9) ? accessibility_menu : (g_st == 11) ? graphics_menu : (g_st == 13) ? debug_menu : demo_menu;
     int has_arrow_at = (g_st == 2) ? 6 : -1;
 
+    int item_step = (MENU_ITEM_H - 4);
+    if (item_step < 1) item_step = 1;
+    int view_h = mh - header_h - 6;
+    int max_start = ic - (view_h / item_step);
+    if (max_start < 0) max_start = 0;
+    if (menu_scroll < 0) menu_scroll = 0;
+    if (menu_scroll > max_start) menu_scroll = max_start;
+
     for (int i = 0; i < ic; i++) {
-        int iy = my + header_h + i * (MENU_ITEM_H - 4);
+        int iy = my + header_h + i * item_step - menu_scroll * item_step;
+        if (iy + item_step < my + header_h || iy >= my + mh - 6) continue;
         int is_sel = (m_idx == i);
-        int row_h = MENU_ITEM_H - 4;
+        int row_h = item_step;
 
         /* Selection / hover pill */
-        uint32_t pill_bg = is_sel ? sel_bg : ((mx_mouse >= mx + 8 && mx_mouse <= mx + mw - 8 && my_mouse >= iy && my_mouse <= iy + row_h) ? (p->theme == 0 ? 0x1D212A : 0xE5E7EB) : 0);
+        uint32_t pill_bg = is_sel ? sel_bg : ((mx_mouse >= mx + 8 && mx_mouse <= mx + mw - 8 && my_mouse >= iy && my_mouse <= iy + row_h) ? hover_bg : 0);
         if (pill_bg != 0) {
-            gfx_fill_rect(mx + 6, iy, mw - 12, row_h, pill_bg);
+            gfx_fill_rect_rounded(mx + 6, iy, mw - 12, row_h, 6, pill_bg);
         }
 
         /* Icon + label row */
@@ -503,20 +537,20 @@ static void render_search_panel(void) {
     int mx = (fw - mw) / 2;
     int my = (fh - mh) / 2 - 40; // Slightly above center for Spotlight feel
     personalization_t* p = get_personalization();
-    uint32_t bg_main = (p->theme == 0) ? 0x15171D : 0xFFFFFF;
-    uint32_t text_clr = (p->theme == 0) ? 0xE4E6EA : 0x202124;
-    uint32_t head_bg = (p->theme == 0) ? 0x1D1F26 : 0xF8F9FA;
+    uint32_t bg_main = theme_get_color(THEME_ROLE_MENU_BG);
+    uint32_t text_clr = theme_get_color(THEME_ROLE_PRIMARY);
+    uint32_t head_bg = theme_get_color(THEME_ROLE_SURFACE_VARIANT);
     uint32_t accent = get_accent_color();
 
     // Spotlight shadow
     gfx_draw_shadow(mx, my, mw, mh, 40);
     gfx_fill_rect(mx, my, mw, mh, bg_main);
-    gfx_draw_rect_outline(mx, my, mw, mh, 1, (p->theme == 0) ? 0x383B44 : 0xDADCE0);
+    gfx_draw_rect_outline(mx, my, mw, mh, 1, theme_get_color(THEME_ROLE_OUTLINE));
 
     // Big Search Input Area
     int input_h = 70;
     gfx_fill_rect(mx + 2, my + 2, mw - 4, input_h, head_bg);
-    gfx_draw_hline(mx, my + input_h + 2, mw, (p->theme == 0) ? 0x383B44 : 0xDADCE0);
+    gfx_draw_hline(mx, my + input_h + 2, mw, theme_get_color(THEME_ROLE_OUTLINE));
 
     gfx_draw_string_transparent(mx + 20, my + 28, "Q", text_clr); // Magnifying glass stand-in
 
@@ -535,7 +569,7 @@ static void render_search_panel(void) {
     }
 
     if (search_len == 0 && search_result_count == 0) {
-        gfx_draw_string_transparent(mx + 60, my + 28, "Type to search...", (p->theme == 0) ? 0x6D7079 : 0x9AA0A6);
+        gfx_draw_string_transparent(mx + 20, my + 28, "Type to search...", theme_get_color(THEME_ROLE_SECONDARY));
     }
 
     int ry = my + input_h + 10;
@@ -548,7 +582,7 @@ static void render_search_panel(void) {
         int idx = i + search_scroll;
         int iy = ry + i * 48; // Taller rows
         if (search_sel == idx) {
-            gfx_fill_rect(mx + 10, iy, mw - 20, 44, (p->theme == 0 ? 0x262830 : 0xE8EAED));
+            gfx_fill_rect(mx + 10, iy, mw - 20, 44, theme_get_color(THEME_ROLE_SURFACE_VARIANT));
             gfx_draw_rect_outline(mx + 10, iy, mw - 20, 44, 1, text_clr);
         }
         draw_app_icon(all_items[search_results[idx]], mx + 24, iy + 10);
@@ -560,7 +594,7 @@ static void render_search_panel(void) {
         int sb_h = mh - (ry - my) - 20;
         int th = (sb_h * show_count) / search_result_count;
         int ty = ry + (search_scroll * (sb_h - th)) / (search_result_count - show_count);
-        gfx_fill_rect(mx + mw - 10, ry, 4, sb_h, (p->theme == 0 ? 0x262830 : 0xE8EAED));
+        gfx_fill_rect(mx + mw - 10, ry, 4, sb_h, theme_get_color(THEME_ROLE_SURFACE_VARIANT));
         gfx_fill_rect(mx + mw - 10, ty, 4, th, text_clr);
     }
 }
@@ -570,15 +604,15 @@ static void launch_item(int global_idx) {
     if      (global_idx == 0) calculator();
     else if (global_idx == 1) file_explorer();
     else if (global_idx == 2) pci_scanner_app();
-    else if (global_idx == 3) system_app();
-    else if (global_idx == 4) text_editor();
-    else if (global_idx == 5) cube_3d_app();
+    else if (global_idx == 3) personalization_app();
+    else if (global_idx == 4) system_app();
+    else if (global_idx == 5) text_editor();
     else if (global_idx == 6) mandelbrot_app();
-    else if (global_idx == 7) terminal_app();
-    else if (global_idx == 8) process_viewer_app();
-    else if (global_idx == 9) bdrowser();
-    else if (global_idx == 10) calendar_app();
-    else if (global_idx == 11) weather_app();
+    else if (global_idx == 7) hexdump_app();
+    else if (global_idx == 8) terminal_app();
+    else if (global_idx == 9) process_viewer_app();
+    else if (global_idx == 10) httpviewer();
+    else if (global_idx == 11) calendar_app();
     else if (global_idx == 12) piano_app();
     else if (global_idx == 13) snake_app();
     else if (global_idx == 14) mines_app();
@@ -589,17 +623,23 @@ static void launch_item(int global_idx) {
     else if (global_idx == 19) flappy_app();
     else if (global_idx == 20) osk_app();
     else if (global_idx == 21) imgview_app();
-    else if (global_idx == 22) sudoku_app();
+    else if (global_idx == 22) bitmap_maker_app();
+    else if (global_idx == 23) sudoku_app();
+    else if (global_idx == 24) graphing_app();
+    else if (global_idx == 25) netdebug_app();
+    else if (global_idx == 26) perfmon_app();
+    else if (global_idx == 27) kernellog_app();
 }
 
 static void handle_menu_click(int cx, int cy) {
     int mx, my, mw, mh, ic; get_menu_geometry(&mx, &my, &mw, &mh, &ic);
     if (!point_in_rect(cx, cy, mx, my, mw, mh)) { g_st = 1; return; }
 
+    int header_h = 36;
     // Back button click (header area on sub-menus)
-    if (g_st > 2 && cy < my + 52) { g_st = 2; m_idx = 0; return; }
+    if (g_st > 2 && cy < my + header_h) { g_st = 2; m_idx = 0; return; }
 
-    int rel_y = cy - (my + 52);
+    int rel_y = cy - (my + header_h) + menu_scroll * (MENU_ITEM_H - 4);
     if (rel_y < 0) return;
     int idx = rel_y / (MENU_ITEM_H - 4);
 
@@ -610,34 +650,42 @@ static void handle_menu_click(int cx, int cy) {
             else if (idx == 2) { g_st = 7; m_idx = 0; }
             else if (idx == 3) { g_st = 9; m_idx = 0; }
             else if (idx == 4) { g_st = 11; m_idx = 0; }
-            else if (idx == 5) { g_st = 6; m_idx = 0; }
-            else if (idx == 6) { g_st = 1; terminal_app(); }
-            else if (idx == 7) { g_st = 1; gui_system_shutdown(); }
+            else if (idx == 5) { g_st = 13; m_idx = 0; }
+            else if (idx == 6) { g_st = 6; m_idx = 0; }
+            else if (idx == 7) { g_st = 1; terminal_app(); }
+            else if (idx == 8) { g_st = 1; gui_system_shutdown(); }
         } else if (g_st == 9) {
             g_st = 1;
             if (idx == 0) osk_app();
         } else if (g_st == 11) {
             g_st = 1;
-            if (idx == 0) imgview_app();
+            if      (idx == 0) imgview_app();
+            else if (idx == 1) graphing_app();
+        } else if (g_st == 13) {
+            g_st = 1;
+            if      (idx == 0) perfmon_app();
+            else if (idx == 1) kernellog_app();
+            else if (idx == 2) netdebug_app();
         } else if (g_st == 3) {
             g_st = 1;
             if      (idx == 0) calculator();
             else if (idx == 1) file_explorer();
             else if (idx == 2) text_editor();
-            else if (idx == 3) bdrowser();
+            else if (idx == 3) httpviewer();
             else if (idx == 4) calendar_app();
             else if (idx == 5) process_viewer_app();
             else if (idx == 6) clock_app();
-            else if (idx == 7) weather_app();
+            else if (idx == 7) imgview_app();
+            else if (idx == 8) bitmap_maker_app();
         } else if (g_st == 5) {
             g_st = 1;
             if      (idx == 0) pci_scanner_app();
-            else if (idx == 1) system_app();
+            else if (idx == 1) personalization_app();
+            else if (idx == 2) system_app();
         } else if (g_st == 6) {
             g_st = 1;
-            if      (idx == 0) cube_3d_app();
-            else if (idx == 1) mandelbrot_app();
-        }else if (g_st == 7) {
+            if      (idx == 0) mandelbrot_app();
+        } else if (g_st == 7) {
             g_st = 1;
             if      (idx == 0) piano_app();
             else if (idx == 1) snake_app();
@@ -659,16 +707,20 @@ void gui_handle_menu_key(char key_in) {
     else if (KEY_MATCH(key, KEY_DOWN)) { if (m_idx < ic - 1) m_idx++; }
     else if (KEY_MATCH(key, KEY_LEFT)) { if (g_st > 2) { g_st = 2; m_idx = 0; } }
     else if (KEY_MATCH(key, KEY_RIGHT) || key == '\n') {
-        if (g_st == 2 && m_idx < 6) {
+        if (g_st == 2 && m_idx < 7) {
             if      (m_idx == 0) g_st = 3;
             else if (m_idx == 1) g_st = 5;
             else if (m_idx == 2) g_st = 7;
             else if (m_idx == 3) g_st = 9;
             else if (m_idx == 4) g_st = 11;
-            else if (m_idx == 5) g_st = 6;
+            else if (m_idx == 5) g_st = 13;
+            else if (m_idx == 6) g_st = 6;
             m_idx = 0;
         }
-        else if (key == '\n') handle_menu_click(mx + 8, my + 52 + m_idx * (MENU_ITEM_H - 4) + ((MENU_ITEM_H - 4) / 2));
+        else if (key == '\n') {
+            int header_h = 36;
+            handle_menu_click(mx + 8, my + header_h + m_idx * (MENU_ITEM_H - 4) + ((MENU_ITEM_H - 4) / 2));
+        }
     }
 }
 
@@ -688,7 +740,7 @@ void gui_handle_topbar_cfg_key(char key) { (void)key; }
 void gui_handle_search_key(char key_in) {
     unsigned char key = (unsigned char)key_in; if (!search_open) return;
     if (key == 27) { search_open = 0; return; }
-    if (key == '\b') { if (search_len > 0) { search_buf[--search_len] = 0; update_search_results(); } }
+    else if (KEY_MATCH(key, '\b')) { if (search_len > 0) { search_buf[--search_len] = 0; update_search_results(); } }
     else if (KEY_MATCH(key, KEY_UP)) { if (search_sel > 0) search_sel--; }
     else if (KEY_MATCH(key, KEY_DOWN)) { if (search_sel < search_result_count - 1) search_sel++; }
     else if (key == '\n' && search_result_count > 0) launch_item(search_results[search_sel]);
@@ -696,18 +748,31 @@ void gui_handle_search_key(char key_in) {
 }
 
 void start_gui(void) {
+    theme_init();
     gui_running = 1; g_st = 1; search_open = 0; m_idx = 0; wm_init(); gfx_reset_clip();
+    serial_puts("[GUI] after wm_init\n");
+    serial_puts("[GUI] entering main loop\n");
+    int loop_count = 0;
     while (gui_running) {
+        loop_count++;
+        if (loop_count == 1) serial_puts("[GUI] loop iter 1\n");
         int mbtn = mouse_get_buttons(), cx = mouse_get_x(), cy = mouse_get_y(), fw = get_fb_width(), fh = get_fb_height();
+        if (loop_count == 1) serial_puts("[GUI] got fb dims\n");
         if (fw == 0) { sleep_ms(10); continue; }
+        if (loop_count == 1) serial_puts("[GUI] fw != 0\n");
         int clicked = (mbtn & 1) && !(prev_mouse_btn & 1), taskbar_y = fh - TASKBAR_H, click_handled = 0;
         int margin = 8, gap = 4;
-        int start_btn_w = 48, search_btn_w = 36;
+        int start_btn_w = 28, search_btn_w = 36;
         int search_x = margin + start_btn_w + gap;
         int sep1_x = search_x + search_btn_w + gap / 2;
 
-        /* Compute tab area */
-        int tab_area_x = sep1_x + gap / 2;
+        /* Desktop switcher bounds */
+        int desk_w = 36, desk_h = 26, desk_gap = 4;
+
+        /* Compute tab area (after desktop switcher) */
+        int desk_area_w = DESKTOP_COUNT * (desk_w + desk_gap) - desk_gap;
+        int desk_area_x = sep1_x + gap + 4;
+        int tab_area_x = desk_area_x + desk_area_w + gap + 4;
         int tab_area_w = fw - tab_area_x - 220;
         if (tab_area_w < 100) tab_area_w = 100;
 
@@ -723,14 +788,8 @@ void start_gui(void) {
         }
         int tab_end_x = tab_area_x + open_windows * (tab_w + gap + 2) - 2;
 
-        /* Desktop switcher bounds */
-        int desk_w = 28, desk_h = 22, desk_gap = 4;
-        int desk_area_w = DESKTOP_COUNT * (desk_w + desk_gap) - desk_gap;
-        int desk_area_x = sep1_x + gap + 4;
-        int desk_start_x = desk_area_x;
-
         if (clicked) {
-            /* Start button */
+            /* B logo opens start menu */
             if (!click_handled && point_in_rect(cx, cy, margin, taskbar_y, start_btn_w, TASKBAR_H)) {
                 gui_toggle_start_menu();
                 click_handled = 1;
@@ -762,9 +821,15 @@ void start_gui(void) {
             if (!click_handled) {
                 for (int i = 0; i < DESKTOP_COUNT; i++) {
                     int dx = sep1_x + gap + 4 + i * (desk_w + desk_gap);
-                    int dy = taskbar_y + 4;
+                    int dy = taskbar_y + 3;
                     if (point_in_rect(cx, cy, dx, dy, desk_w, desk_h)) {
-                        wm_set_current_desktop(i);
+                        /* Clicking current desktop switches to previous desktop */
+                        if (i == wm_get_current_desktop()) {
+                            int prev = wm_get_previous_desktop();
+                            if (prev != i) wm_set_current_desktop(prev);
+                        } else {
+                            wm_set_current_desktop(i);
+                        }
                         click_handled = 1;
                         break;
                     }
@@ -773,14 +838,19 @@ void start_gui(void) {
 
             /* Volume tray */
             if (!click_handled) {
-                int vol_tray_x = fw - 80 - margin;
-                int vol_x = vol_tray_x + 10;
-                int vol_y = taskbar_y + (TASKBAR_H - 14) / 2;
-                if (point_in_rect(cx, cy, vol_x, vol_y, 14, 14)) {
-                    int rel = cx - vol_x;
+                int vol_tray_x = fw - 170 - margin;
+                int spk_x = vol_tray_x + 8;
+                int spk_y = taskbar_y + (TASKBAR_H - 14) / 2;
+                int track_x = spk_x + 18;
+                int track_y = taskbar_y + (TASKBAR_H - 6) / 2;
+                int track_w = 72;
+
+                if (cx >= track_x && cx < track_x + track_w &&
+                    cy >= track_y - 4 && cy < track_y + 10) {
+                    int rel = cx - track_x;
                     if (rel < 0) rel = 0;
-                    if (rel > 14) rel = 14;
-                    audio_set_master_volume((rel * 100) / 14);
+                    if (rel > track_w) rel = track_w;
+                    audio_set_master_volume((rel * 100) / track_w);
                     click_handled = 1;
                 }
             }
@@ -812,8 +882,57 @@ void start_gui(void) {
 
         if (g_st >= 2) {
             int mmx, mmy, mmw, mmh, ic; get_menu_geometry(&mmx, &mmy, &mmw, &mmh, &ic);
+            int header_h = 36;
+            int item_step = (MENU_ITEM_H - 4);
             if(point_in_rect(cx, cy, mmx, mmy, mmw, mmh)) {
-                int ry = cy - (mmy + 52); if(ry >= 0) { int i = ry / (MENU_ITEM_H - 4); if(i < ic) m_idx = i; }
+                int ry = cy - (mmy + header_h) + menu_scroll * item_step;
+                if(ry >= 0) { int i = ry / item_step; if(i < ic) m_idx = i; }
+            }
+        }
+
+        {
+            int wheel = mouse_get_wheel_delta();
+            if (wheel != 0) {
+                if (g_st >= 2) {
+                    int mmx, mmy, mmw, mmh, ic; get_menu_geometry(&mmx, &mmy, &mmw, &mmh, &ic);
+                    int header_h = 36;
+                    int item_step = (MENU_ITEM_H - 4);
+                    int view_h = mmh - header_h - 6;
+                    int max_start = ic - (view_h / item_step);
+                    if (max_start < 0) max_start = 0;
+                    menu_scroll += wheel;
+                    if (menu_scroll < 0) menu_scroll = 0;
+                    if (menu_scroll > max_start) menu_scroll = max_start;
+                    int visible = view_h / item_step;
+                    if (visible < 1) visible = 1;
+                    if (ic > 0) {
+                        if (m_idx < menu_scroll) m_idx = menu_scroll;
+                        if (m_idx >= menu_scroll + visible) m_idx = menu_scroll + visible - 1;
+                        if (m_idx >= ic) m_idx = ic - 1;
+                    }
+                }
+                if (search_open) {
+                    int show_count = 6;
+                    int max_scroll = search_result_count - show_count;
+                    if (max_scroll < 0) max_scroll = 0;
+                    search_scroll += wheel;
+                    if (search_scroll < 0) search_scroll = 0;
+                    if (search_scroll > max_scroll) search_scroll = max_scroll;
+                    if (search_sel < search_scroll) search_sel = search_scroll;
+                    if (search_sel >= search_scroll + show_count) search_sel = search_scroll + show_count - 1;
+                    if (search_sel >= search_result_count) search_sel = search_result_count - 1;
+                }
+                if (wm_get_window_count() > 0) {
+                    int fid = wm_get_focused();
+                    wm_window_t* fw = wm_get_window(fid);
+                    if (fw && fw->content_h > (fw->h - WM_TITLEBAR_H)) {
+                        fw->view_y += wheel * 20;
+                        int max_v = fw->content_h - (fw->h - WM_TITLEBAR_H);
+                        if (fw->view_y < 0) fw->view_y = 0;
+                        if (fw->view_y > max_v) fw->view_y = (max_v > 0 ? max_v : 0);
+                    }
+                }
+                mouse_clear_wheel_delta();
             }
         }
         draw_premium_wallpaper(); wm_tick();

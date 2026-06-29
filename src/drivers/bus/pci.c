@@ -24,17 +24,18 @@ extern void draw_boot_log(void);
 
 void pci_init() {
     pci_count = 0;
-    boot_log_add("PCI", "Enumerating buses...", 0x58A6FF, 0xE8EAED);
-    draw_boot_log();
+//    boot_log_add("PCI", "Enumerating buses...", 0x58A6FF, 0xE8EAED);
+//    draw_boot_log();
     for (int bus = 0; bus < 256; bus++) { 
+        int has_device = 0;
         for (int slot = 0; slot < 32; slot++) {
-            // Check if slot exists by reading func 0
             uint32_t id = pci_config_read(bus, slot, 0, 0);
             if ((id & 0xFFFF) == 0xFFFF) continue;
 
-            // Check if multi-function device
+            has_device = 1;
+
             uint32_t header = pci_config_read(bus, slot, 0, 0x0C);
-            int is_multi = (header & 0x800000); // Bit 23 (80 in 0x0C dword)
+            int is_multi = (header & 0x800000);
 
             for (int func = 0; func < (is_multi ? 8 : 1); func++) {
                 id = pci_config_read(bus, slot, func, 0);
@@ -58,10 +59,10 @@ void pci_init() {
                 for (int i = 0; i < 6; i++) {
                     uint32_t bar = pci_config_read(bus, slot, func, 0x10 + (i * 4));
                     dev->bar[i] = bar;
-                    if ((bar & 0x6) == 0x4) { // 64-bit BAR
+                    if ((bar & 0x6) == 0x4) {
                         uint64_t bar_high = pci_config_read(bus, slot, func, 0x10 + ((i + 1) * 4));
                         dev->bar_64[i] = ((uint64_t)bar_high << 32) | (bar & ~0xF);
-                        i++; // Skip next BAR
+                        i++;
                     } else {
                         dev->bar_64[i] = bar & ~0xF;
                     }
@@ -70,6 +71,7 @@ void pci_init() {
                 if (pci_count >= 64) return;
             }
         }
+        if (!has_device && bus > 0) break;
     }
 }
 
